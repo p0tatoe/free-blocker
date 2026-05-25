@@ -8,11 +8,40 @@ import android.util.Log
 class DnsFilter {
     private val TAG = "DnsFilter"
 
+    @Volatile
     private var blocklist: Set<String> = emptySet()
 
     fun updateBlocklist(newBlocklist: Set<String>) {
         this.blocklist = newBlocklist
         Log.d(TAG, "DnsFilter initialized with ${newBlocklist.size} static rules.")
+    }
+
+    /**
+     * Adds a single domain to the live blocklist immediately.
+     * Used when the user adds a manual blocked domain so it takes effect
+     * without waiting for a full blocklist refresh.
+     */
+    @Synchronized
+    fun addDomain(domain: String) {
+        val cleaned = domain.lowercase().trim()
+        if (cleaned.isNotEmpty()) {
+            blocklist = blocklist + cleaned
+            Log.d(TAG, "Added domain to live filter: $cleaned (total: ${blocklist.size})")
+        }
+    }
+
+    /**
+     * Removes a single domain from the live blocklist immediately.
+     * Used when the user whitelists a domain so it is unblocked without
+     * waiting for a full blocklist refresh.
+     */
+    @Synchronized
+    fun removeDomain(domain: String) {
+        val cleaned = domain.lowercase().trim()
+        if (cleaned.isNotEmpty()) {
+            blocklist = blocklist - cleaned
+            Log.d(TAG, "Removed domain from live filter: $cleaned (total: ${blocklist.size})")
+        }
     }
 
     fun shouldBlock(domain: String): Boolean {

@@ -6,11 +6,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.*
-import java.net.*
+import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -25,47 +24,31 @@ import org.chromium.net.UrlResponseInfo
 import java.nio.ByteBuffer as NioByteBuffer
 
 /**
- * A local DNS proxy server that listens on 127.0.0.1:5353 (both UDP and TCP).
+ * DNS query handler that filters domains against [DnsFilter] and forwards
+ * allowed queries upstream via a Happy Eyeballs race between DoQ
+ * (DNS-over-QUIC) and DoH (DNS-over-HTTPS).
  *
  * Architecture:
- *  - The VPN's IpRouter redirects all DNS traffic (port 53 UDP/TCP) to this proxy
- *    via VpnService.Builder.addDnsServer("127.0.0.1").
+ *  - [TunPacketRouter] reads raw IP packets from the VPN TUN interface,
+ *    extracts DNS payloads, and calls [handleDnsQuery] directly.
  *
- *  - This proxy intercepts the DNS payload, checks the domain against [DnsFilter]:
- *    - BLOCKED  → immediately replies with NXDOMAIN, never touching the network.
- *    - ALLOWED  → forwards the query upstream using a Happy Eyeballs race between
- *                 DoQ (DNS-over-QUIC) and DoH (DNS-over-HTTPS).
+ *  - Blocked domains receive an immediate NXDOMAIN response without
+ *    touching the network.
  *
- *  NOTE: Plain UDP and plain TCP upstream forwarding have been intentionally removed.
- *  All upstream communication uses an encrypted transport to comply with Google Play's
- *  VpnService policy requiring traffic encryption. The inbound listeners (127.0.0.1
- *  loopback only) remain UDP+TCP since they never leave the device.
+ *  - Allowed queries are forwarded upstream using encrypted transports
+ *    only (DoQ/DoH) to comply with Google Play's VpnService policy.
  *
  *  Happy Eyeballs upstream strategy (RFC 8305 inspired):
  *  - DoQ is attempted first (fastest — raw QUIC, no HTTP framing overhead).
- *  - After [DOH_DELAY] with no DoQ response, DoH is started in parallel (TCP 443,
- *    universally reachable even on restrictive networks).
+ *  - After [DOH_DELAY] with no DoQ response, DoH is started in parallel
+ *    (TCP 443, universally reachable even on restrictive networks).
  *  - Whichever responds first wins; the other is cancelled.
- *  - This gives DoQ a fair head start on healthy networks while bounding worst-case
- *    latency on networks that block UDP 853.
+ *  - This gives DoQ a fair head start on healthy networks while bounding
+ *    worst-case latency on networks that block UDP 853.
  *
  *  - DoH reuses a single OkHttpClient (HTTP/2 multiplexes over one TLS connection).
  *  - DoQ uses Cronet's QUIC stack (available on Android via Play Services). Cronet
  *    manages its own QUIC connection internally.
- *
- * Usage:
- *   val proxy = DnsProxyServer(
- *       context   = applicationContext,
- *       dnsFilter = myFilter,
- *       upstream  = UpstreamConfig(
- *           host        = "1.1.1.1",
- *           sniHostname = "cloudflare-dns.com",
- *           dohUrl      = "https://cloudflare-dns.com/dns-query",
- *       ),
- *   )
- *   with(proxy) { coroutineScope.start() }
- *   ...
- *   proxy.stop()
  */
 class DnsProxyServer(
     private val context: Context,
@@ -75,10 +58,6 @@ class DnsProxyServer(
 
     companion object {
         private const val TAG               = "DnsProxyServer"
-        const val PROXY_HOST                = "127.0.0.1"
-        const val PROXY_PORT                = 5353
-        private const val MAX_DNS_UDP_SIZE  = 512
-        private const val MAX_DNS_TCP_SIZE  = 65535
         private val SOCKET_TIMEOUT  = 5_000.milliseconds
         private val DOH_DELAY       = 100.milliseconds   // head-start for DoQ before DoH races
     }
@@ -184,6 +163,9 @@ class DnsProxyServer(
                     .connectTimeout(SOCKET_TIMEOUT)
                     .readTimeout(SOCKET_TIMEOUT)
                     .writeTimeout(SOCKET_TIMEOUT)
+                    // Resolve the upstream hostname directly to its known IP so
+                    // DNS resolution doesn't loop back through our own VPN.
+                    .dns { listOf(InetAddress.getByName(config.host)) }
                     .build()
                     .also { Log.d(TAG, "Clients: created OkHttpClient for ${config.host}") }
             }
@@ -229,132 +211,9 @@ class DnsProxyServer(
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    private var udpJob: Job? = null
-    private var tcpJob: Job? = null
-    private var udpSocket: DatagramSocket? = null
-    private var tcpSocket: ServerSocket? = null
-
-    /**
-     * Starts both the UDP and TCP inbound listeners as child coroutines of the
-     * receiver scope. Must be called from within an active [CoroutineScope].
-     *
-     * NOTE: "UDP/TCP" here refers to the *inbound* loopback transport between the
-     * VPN tun interface and this proxy. All *upstream* traffic uses DoQ or DoH.
-     */
-    fun CoroutineScope.start() {
-        udpJob = launch(Dispatchers.IO) { runUdpListener() }
-        tcpJob = launch(Dispatchers.IO) { runTcpListener() }
-        Log.i(TAG, "DNS proxy started on $PROXY_HOST:$PROXY_PORT (inbound UDP+TCP, upstream DoQ+DoH Happy Eyeballs)")
-    }
-
     fun stop() {
-        udpJob?.cancel()
-        tcpJob?.cancel()
-        udpSocket?.close()
-        tcpSocket?.close()
         upstreamClients.drain()
-        Log.i(TAG, "DNS proxy stopped")
-    }
-
-    // -------------------------------------------------------------------------
-    // Inbound UDP listener  (loopback only — from apps via the VPN tun interface)
-    // -------------------------------------------------------------------------
-
-    private suspend fun runUdpListener() {
-        val socket = DatagramSocket(PROXY_PORT, InetAddress.getByName(PROXY_HOST))
-            .also { udpSocket = it }
-
-        val buffer = ByteArray(MAX_DNS_UDP_SIZE)
-        Log.i(TAG, "UDP listener active")
-
-        try {
-            while (currentCoroutineContext().isActive) {
-                val packet = DatagramPacket(buffer, buffer.size)
-                socket.receive(packet)
-
-                val queryBytes    = packet.data.copyOf(packet.length)
-                val clientAddress = packet.socketAddress
-
-                coroutineScope {
-                    launch(Dispatchers.IO) {
-                        val response       = handleDnsQuery(queryBytes)
-                        val responsePacket = DatagramPacket(response, response.size, clientAddress)
-                        socket.send(responsePacket)
-                    }
-                }
-            }
-        } catch (e: SocketException) {
-            if (currentCoroutineContext().isActive) Log.w(TAG, "UDP socket closed: ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "UDP listener error", e)
-        } finally {
-            socket.close()
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Inbound TCP listener  (loopback only — DNS-over-TCP uses 2-byte length prefix)
-    // -------------------------------------------------------------------------
-
-    private suspend fun runTcpListener() {
-        val serverSocket = ServerSocket(PROXY_PORT, 50, InetAddress.getByName(PROXY_HOST))
-            .also { tcpSocket = it }
-
-        Log.i(TAG, "TCP listener active")
-
-        try {
-            while (currentCoroutineContext().isActive) {
-                val clientSocket = serverSocket.accept()
-                coroutineScope {
-                    launch(Dispatchers.IO) { handleInboundTcpConnection(clientSocket) }
-                }
-            }
-        } catch (e: SocketException) {
-            if (currentCoroutineContext().isActive) Log.w(TAG, "TCP server socket closed: ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "TCP listener error", e)
-        } finally {
-            serverSocket.close()
-        }
-    }
-
-    /**
-     * Handles a single inbound TCP connection from a local DNS client.
-     * A connection may carry multiple sequential queries (RFC 7766 pipelining).
-     */
-    private suspend fun handleInboundTcpConnection(socket: Socket) {
-        socket.soTimeout = SOCKET_TIMEOUT.inWholeMilliseconds.toInt()
-        try {
-            val din  = DataInputStream(BufferedInputStream(socket.getInputStream()))
-            val dout = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
-
-            while (!socket.isClosed) {
-                val length = try {
-                    din.readShort().toInt() and 0xFFFF
-                } catch (e: EOFException) {
-                    break   // client closed cleanly
-                }
-
-                if (length <= 0 || length > MAX_DNS_TCP_SIZE) {
-                    Log.w(TAG, "Inbound TCP: invalid message length $length, closing")
-                    break
-                }
-
-                val queryBytes = ByteArray(length)
-                din.readFully(queryBytes)
-
-                val response = handleDnsQuery(queryBytes)
-                dout.writeShort(response.size)
-                dout.write(response)
-                dout.flush()
-            }
-        } catch (e: SocketTimeoutException) {
-            // Idle client — normal close
-        } catch (e: IOException) {
-            Log.d(TAG, "Inbound TCP closed: ${e.message}")
-        } finally {
-            runCatching { socket.close() }
-        }
+        Log.i(TAG, "DNS proxy stopped — upstream clients drained")
     }
 
     // -------------------------------------------------------------------------
@@ -365,7 +224,7 @@ class DnsProxyServer(
      * Entry point for every DNS query regardless of inbound transport.
      * Never throws — always returns at least a SERVFAIL on error.
      */
-    private suspend fun handleDnsQuery(queryBytes: ByteArray): ByteArray {
+    internal suspend fun handleDnsQuery(queryBytes: ByteArray): ByteArray {
         return try {
             val domain = parseDnsQueryDomain(queryBytes)
 
@@ -467,7 +326,8 @@ class DnsProxyServer(
                 queryBytes.copyInto(buf, destinationOffset = 2)
             }
 
-            val url = "https://${config.sniHostname}:${config.doqPort}/dns-query"
+            // Use the IP address directly to avoid DNS resolution through our own VPN
+            val url = "https://${config.host}:${config.doqPort}/dns-query"
 
             try {
                 suspendCancellableCoroutine { continuation ->

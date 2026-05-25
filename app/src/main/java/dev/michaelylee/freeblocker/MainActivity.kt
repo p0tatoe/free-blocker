@@ -1,7 +1,6 @@
 package dev.michaelylee.freeblocker
 
 import android.app.Activity
-import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,8 +22,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.lifecycleScope
-import dev.michaelylee.freeblocker.core.MyVpnService
 import dev.michaelylee.freeblocker.ui.AppsScreen
 import dev.michaelylee.freeblocker.ui.BlockedWebsitesScreen
 import dev.michaelylee.freeblocker.ui.BlocklistsScreen
@@ -44,22 +41,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        lifecycleScope.launchWhenStarted {
-            viewModel.isVpnEnabled.collect { isEnabled ->
-                val intent = Intent(this@MainActivity, MyVpnService::class.java)
-                if (isEnabled) {
-                    // If MyVpnService is written as a Foreground Service, use startForegroundService
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
-                    }
-                } else {
-                    stopService(intent)
-                }
-            }
-        }
 
         setContent {
             var selectedTab by remember { mutableStateOf(0) }

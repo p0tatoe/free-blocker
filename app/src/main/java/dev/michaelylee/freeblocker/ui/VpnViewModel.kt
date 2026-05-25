@@ -191,10 +191,18 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         val cleaned = domain.trim().lowercase()
         if (cleaned.isBlank()) return
         viewModelScope.launch { prefs.addManualBlockedDomain(cleaned) }
+        // Push to the live DNS filter immediately so blocking takes effect
+        // without waiting for a full blocklist refresh.
+        ServiceLocator.dnsFilter.addDomain(cleaned)
     }
 
     fun removeManualBlockedDomain(domain: String) {
-        viewModelScope.launch { prefs.removeManualBlockedDomain(domain) }
+        val cleaned = domain.trim().lowercase()
+        viewModelScope.launch { prefs.removeManualBlockedDomain(cleaned) }
+        // Remove from the live filter. If the domain also appears in a
+        // remote blocklist it will reappear on the next full refresh,
+        // which is the expected behaviour (user should whitelist instead).
+        ServiceLocator.dnsFilter.removeDomain(cleaned)
     }
 
     // -------------------------------------------------------------------------
@@ -212,10 +220,18 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         val cleaned = domain.trim().lowercase()
         if (cleaned.isBlank()) return
         viewModelScope.launch { prefs.addWhitelistedDomain(cleaned) }
+        // Immediately remove from the live filter so the domain is
+        // unblocked without waiting for a full blocklist refresh.
+        ServiceLocator.dnsFilter.removeDomain(cleaned)
     }
 
     fun removeWhitelistedDomain(domain: String) {
-        viewModelScope.launch { prefs.removeWhitelistedDomain(domain) }
+        val cleaned = domain.trim().lowercase()
+        viewModelScope.launch { prefs.removeWhitelistedDomain(cleaned) }
+        // Re-add to the live filter so it takes effect immediately.
+        // If it wasn't in any blocklist this is a harmless no-op since
+        // shouldBlock() only matches known domains.
+        ServiceLocator.dnsFilter.addDomain(cleaned)
     }
 
     // -------------------------------------------------------------------------

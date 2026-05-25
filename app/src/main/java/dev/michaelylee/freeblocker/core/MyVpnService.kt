@@ -27,6 +27,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 
 /**
@@ -102,7 +104,13 @@ class MyVpnService : VpnService() {
 
         Log.i(TAG, "Starting VPN engine…")
 
-        startForeground(NOTIFICATION_ID, buildNotification())
+        val notification = buildNotification()
+
+        startForeground(
+            NOTIFICATION_ID,
+            notification,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        )
 
         try {
             vpnInterface = buildTunInterface() ?: run {
@@ -111,6 +119,7 @@ class MyVpnService : VpnService() {
                 return
             }
 
+            startTunLoop()
             registerNetworkCallback()
 
             serviceScope.launch {
@@ -123,22 +132,20 @@ class MyVpnService : VpnService() {
                 dnsProxy.isBlockingEnabled = userPreferences.isBlockingEnabledFlow.first()
                 Log.i(TAG, "Blocking enabled: ${dnsProxy.isBlockingEnabled}")
 
-                // Start the proxy immediately — queries are forwarded upstream
-                // even before the blocklist is ready, so DNS never goes dark.
-                with(dnsProxy) { start() }
 
-                // Load the blocklist in the background. Once complete, DnsFilter
-                // is populated and subsequent queries will be filtered.
-                Log.i(TAG, "Fetching blocklist in background…")
-                blocklistRepository.loadAndCompileBlocklists()
 
-                when (val state = blocklistRepository.state.value) {
-                    is BlocklistState.Success ->
-                        Log.i(TAG, "Blocklist ready — ${state.totalDomains} domains loaded")
-                    is BlocklistState.Error   ->
-                        Log.e(TAG, "Blocklist failed to load: ${state.message}")
-                    else -> Unit
-                }
+                // TODO: Re-enable blocklist loading once manual blocking is validated.
+                // Temporarily disabled to isolate the TUN packet pipeline.
+                // Log.i(TAG, "Fetching blocklist in background…")
+                // blocklistRepository.loadAndCompileBlocklists()
+                //
+                // when (val state = blocklistRepository.state.value) {
+                //     is BlocklistState.Success ->
+                //         Log.i(TAG, "Blocklist ready — ${state.totalDomains} domains loaded")
+                //     is BlocklistState.Error   ->
+                //         Log.e(TAG, "Blocklist failed to load: ${state.message}")
+                //     else -> Unit
+                // }
             }
 
         } catch (e: Exception) {
@@ -167,18 +174,36 @@ class MyVpnService : VpnService() {
         stopSelf()
     }
 
+    private fun startTunLoop() {
+        val fd = vpnInterface?.fileDescriptor ?: return
+
+        val router = TunPacketRouter(
+            tunInput   = FileInputStream(fd),
+            tunOutput  = FileOutputStream(fd),
+            dnsHandler = { queryBytes -> dnsProxy.handleDnsQuery(queryBytes) },
+        )
+
+        serviceScope.launch {
+            router.run()
+        }
+    }
+
     /**
      * Builds and establishes the TUN interface to redirect DNS queries to [DnsProxyServer].
      */
     private fun buildTunInterface(): ParcelFileDescriptor? =
         Builder()
             .setSession("FreeBlockerVPN")
+            // IPv4 Setup
             .addAddress("10.0.0.2", 32)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("127.0.0.1")
+            .addDnsServer("10.0.0.1")
+            .addRoute("10.0.0.1", 32)  // Route DNS traffic through TUN to our packet router
+
+            // IPv6 Setup
             .addAddress("fd00::2", 128)
-            .addRoute("::", 0)
-            .addDnsServer("::1")
+            .addDnsServer("fd00::1")
+            .addRoute("fd00::1", 128)  // Route IPv6 DNS traffic through TUN
+
             .setMtu(1500)
             .establish()
 
