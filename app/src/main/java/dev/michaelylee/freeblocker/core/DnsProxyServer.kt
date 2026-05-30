@@ -38,15 +38,6 @@ import java.nio.ByteBuffer as NioByteBuffer
  *  - Allowed queries are forwarded upstream using encrypted transports
  *    only (DoQ/DoH) to comply with Google Play's VpnService policy.
  *
- *  Happy Eyeballs upstream strategy (RFC 8305 inspired):
- *  - DoQ is attempted first (fastest — raw QUIC, no HTTP framing overhead).
- *  - After [DOH_DELAY] with no DoQ response, DoH is started in parallel
- *    (TCP 443, universally reachable even on restrictive networks).
- *  - Whichever responds first wins; the other is cancelled.
- *  - This gives DoQ a fair head start on healthy networks while bounding
- *    worst-case latency on networks that block UDP 853.
- *
- *  - DoH reuses a single OkHttpClient (HTTP/2 multiplexes over one TLS connection).
  *  - DoQ uses Cronet's QUIC stack (available on Android via Play Services). Cronet
  *    manages its own QUIC connection internally.
  */
@@ -59,7 +50,6 @@ class DnsProxyServer(
     companion object {
         private const val TAG               = "DnsProxyServer"
         private val SOCKET_TIMEOUT  = 5_000.milliseconds
-        private val DOH_DELAY       = 100.milliseconds   // head-start for DoQ before DoH races
     }
 
     // -------------------------------------------------------------------------
@@ -153,6 +143,7 @@ class DnsProxyServer(
         private val httpClients  = ConcurrentHashMap<UpstreamConfig, OkHttpClient>()
         private val cronetLock   = Any()
         @Volatile private var cronetEngine: CronetEngine? = null
+        val cronetExecutor = Executors.newFixedThreadPool(4)
 
         // ---- DoH ----------------------------------------------------------------
 
@@ -182,8 +173,8 @@ class DnsProxyServer(
             return synchronized(cronetLock) {
                 cronetEngine ?: CronetEngine.Builder(context)
                     .enableQuic(true)
-                    .enableHttp2(false)
-                    .addQuicHint(config.host, config.doqPort, config.doqPort)
+                    .enableHttp2(true) // Enable HTTP/2 fallback for Cronet
+                    .addQuicHint(config.host, 443, 443)
                     .build()
                     .also {
                         cronetEngine = it
@@ -233,7 +224,7 @@ class DnsProxyServer(
                 buildNxdomainResponse(queryBytes)
             } else {
                 Log.d(TAG, "ALLOW  ${domain ?: "<unparseable>"}")
-                forwardHappyEyeballs(queryBytes, upstream)
+                forwardUpstream(queryBytes, upstream)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Query handling failed", e)
@@ -242,63 +233,22 @@ class DnsProxyServer(
     }
 
     // -------------------------------------------------------------------------
-    // Happy Eyeballs upstream race (DoQ first, DoH after delay)
+    // Sequential upstream forwarding (DoQ with fallback to DoH)
     // -------------------------------------------------------------------------
 
     /**
-     * Races DoQ and DoH using a Happy Eyeballs strategy (RFC 8305 inspired):
-     *
-     *   t=0ms      DoQ attempt starts.
-     *   t=100ms    If DoQ hasn't responded yet, DoH attempt starts in parallel.
-     *   t=first    Whichever resolves first wins; the other coroutine is cancelled.
-     *
-     * The [DOH_DELAY] head-start ensures DoQ wins on healthy networks without
-     * requiring any extra round-trips. DoH acts as a silent fallback for networks
-     * that block UDP 853 (corporate firewalls, some mobile carriers, captive portals).
-     *
-     * Uses [select] to race the two [Deferred]s. The loser is cancelled but its
-     * resources (OkHttp call, Cronet request) are cleaned up in each method's
-     * finally block.
+     * Attempts DoQ first. If it fails or times out, falls back to DoH.
      */
-    private suspend fun forwardHappyEyeballs(queryBytes: ByteArray, config: UpstreamConfig): ByteArray =
-        coroutineScope {
-            // DoQ starts immediately
-            val doqDeferred = async(Dispatchers.IO) {
-                runCatching { forwardDoq(queryBytes, config) }
+    private suspend fun forwardUpstream(queryBytes: ByteArray, config: UpstreamConfig): ByteArray {
+        return try {
+            withTimeout(1500) {
+                forwardDoq(queryBytes, config)
             }
-
-            // DoH starts after a delay, giving DoQ a head start
-            val dohDeferred = async(Dispatchers.IO) {
-                delay(DOH_DELAY)
-                runCatching { forwardDoh(queryBytes, config) }
-            }
-
-            try {
-                // Wait for the first successful result.
-                // If DoQ wins with a failure and DoH hasn't started yet, we still
-                // wait for DoH to complete before giving up.
-                val result = select<Result<ByteArray>> {
-                    doqDeferred.onAwait { it }
-                    dohDeferred.onAwait { it }
-                }
-
-                if (result.isSuccess) {
-                    // Winner succeeded — cancel the loser
-                    doqDeferred.cancel()
-                    dohDeferred.cancel()
-                    Log.d(TAG, "Happy Eyeballs: winner resolved")
-                    result.getOrThrow()
-                } else {
-                    // Winner failed — wait for the other one
-                    Log.d(TAG, "Happy Eyeballs: first attempt failed (${result.exceptionOrNull()?.message}), waiting for other")
-                    val fallback = if (doqDeferred.isCompleted) dohDeferred.await() else doqDeferred.await()
-                    fallback.getOrThrow()
-                }
-            } finally {
-                doqDeferred.cancel()
-                dohDeferred.cancel()
-            }
+        } catch (e: Exception) {
+            Log.d(TAG, "DoQ failed or timed out (${e.message}), falling back to DoH")
+            forwardDoh(queryBytes, config)
         }
+    }
 
     // -------------------------------------------------------------------------
     // DNS-over-QUIC (RFC 9250)
@@ -317,92 +267,80 @@ class DnsProxyServer(
     private suspend fun forwardDoq(queryBytes: ByteArray, config: UpstreamConfig): ByteArray =
         withContext(Dispatchers.IO) {
             val engine   = upstreamClients.cronetEngineFor(config)
-            val executor = Executors.newSingleThreadExecutor()
-
-            // Prepend the 2-byte length prefix required by RFC 9250 §4.2
-            val wireBytes = ByteArray(queryBytes.size + 2).also { buf ->
-                buf[0] = (queryBytes.size ushr 8).toByte()
-                buf[1] = (queryBytes.size and 0xFF).toByte()
-                queryBytes.copyInto(buf, destinationOffset = 2)
-            }
+            val executor = upstreamClients.cronetExecutor
 
             // Use the IP address directly to avoid DNS resolution through our own VPN
-            val url = "https://${config.host}:${config.doqPort}/dns-query"
+            // We use port 443 for HTTP/3 (DoH3) instead of 853 because Cronet speaks HTTP/3, not raw DoQ.
+            val url = "https://${config.host}:443/dns-query"
 
-            try {
-                suspendCancellableCoroutine { continuation ->
-                    val response = ByteArrayOutputStream()
+            suspendCancellableCoroutine { continuation ->
+                val response = ByteArrayOutputStream()
 
-                    val callback = object : UrlRequest.Callback() {
-                        override fun onRedirectReceived(
-                            request: UrlRequest, info: UrlResponseInfo, newLocationUrl: String,
-                        ) { request.followRedirect() }
+                val callback = object : UrlRequest.Callback() {
+                    override fun onRedirectReceived(
+                        request: UrlRequest, info: UrlResponseInfo, newLocationUrl: String,
+                    ) { request.followRedirect() }
 
-                        override fun onResponseStarted(request: UrlRequest, info: UrlResponseInfo) {
-                            request.read(NioByteBuffer.allocateDirect(32 * 1024))
-                        }
-
-                        override fun onReadCompleted(
-                            request: UrlRequest, info: UrlResponseInfo, byteBuffer: NioByteBuffer,
-                        ) {
-                            byteBuffer.flip()
-                            val chunk = ByteArray(byteBuffer.remaining()).also { byteBuffer.get(it) }
-                            response.write(chunk)
-                            byteBuffer.clear()
-                            request.read(byteBuffer)
-                        }
-
-                        override fun onSucceeded(request: UrlRequest, info: UrlResponseInfo) {
-                            val raw = response.toByteArray()
-                            val result = runCatching {
-                                if (raw.size < 2) throw IOException("DoQ response too short (${raw.size} bytes)")
-                                val msgLen = ((raw[0].toInt() and 0xFF) shl 8) or (raw[1].toInt() and 0xFF)
-                                if (raw.size < 2 + msgLen) throw IOException("DoQ response truncated (expected ${2 + msgLen}, got ${raw.size})")
-                                raw.copyOfRange(2, 2 + msgLen)
-                            }
-                            continuation.resumeWith(result)
-                        }
-
-                        override fun onFailed(
-                            request: UrlRequest, info: UrlResponseInfo?, e: CronetException,
-                        ) {
-                            continuation.resumeWith(Result.failure(IOException("DoQ failed: ${e.message}", e)))
-                        }
-
-                        override fun onCanceled(request: UrlRequest, info: UrlResponseInfo?) {
-                            continuation.resumeWith(Result.failure(IOException("DoQ cancelled")))
-                        }
+                    override fun onResponseStarted(request: UrlRequest, info: UrlResponseInfo) {
+                        request.read(NioByteBuffer.allocateDirect(32 * 1024))
                     }
 
-                    val request = engine.newUrlRequestBuilder(url, callback, executor)
-                        .setHttpMethod("POST")
-                        .addHeader("Content-Type", "application/dns-message")
-                        .addHeader("Accept", "application/dns-message")
-                        .setUploadDataProvider(
-                            object : UploadDataProvider() {
-                                private var position = 0
-                                override fun getLength() = wireBytes.size.toLong()
-                                override fun read(sink: UploadDataSink, buf: NioByteBuffer) {
-                                    val n = minOf(buf.remaining(), wireBytes.size - position)
-                                    buf.put(wireBytes, position, n)
-                                    position += n
-                                    sink.onReadSucceeded(false)
-                                }
-                                override fun rewind(sink: UploadDataSink) {
-                                    position = 0
-                                    sink.onRewindSucceeded()
-                                }
-                            },
-                            executor,
-                        )
-                        .build()
+                    override fun onReadCompleted(
+                        request: UrlRequest, info: UrlResponseInfo, byteBuffer: NioByteBuffer,
+                    ) {
+                        byteBuffer.flip()
+                        val chunk = ByteArray(byteBuffer.remaining()).also { byteBuffer.get(it) }
+                        response.write(chunk)
+                        byteBuffer.clear()
+                        request.read(byteBuffer)
+                    }
 
-                    // Cancel the Cronet request if the coroutine is cancelled
-                    continuation.invokeOnCancellation { request.cancel() }
-                    request.start()
+                    override fun onSucceeded(request: UrlRequest, info: UrlResponseInfo) {
+                        val raw = response.toByteArray()
+                        val result = runCatching {
+                            if (raw.isEmpty()) throw IOException("DoH3 response empty")
+                            raw
+                        }
+                        continuation.resumeWith(result)
+                    }
+
+                    override fun onFailed(
+                        request: UrlRequest, info: UrlResponseInfo?, e: CronetException,
+                    ) {
+                        continuation.resumeWith(Result.failure(IOException("DoQ failed: ${e.message}", e)))
+                    }
+
+                    override fun onCanceled(request: UrlRequest, info: UrlResponseInfo?) {
+                        continuation.resumeWith(Result.failure(IOException("DoQ cancelled")))
+                    }
                 }
-            } finally {
-                executor.shutdown()
+
+                val request = engine.newUrlRequestBuilder(url, callback, executor)
+                    .setHttpMethod("POST")
+                    .addHeader("Content-Type", "application/dns-message")
+                    .addHeader("Accept", "application/dns-message")
+                    .setUploadDataProvider(
+                        object : UploadDataProvider() {
+                            private var position = 0
+                            override fun getLength() = queryBytes.size.toLong()
+                            override fun read(sink: UploadDataSink, buf: NioByteBuffer) {
+                                val n = minOf(buf.remaining(), queryBytes.size - position)
+                                buf.put(queryBytes, position, n)
+                                position += n
+                                sink.onReadSucceeded(false)
+                            }
+                            override fun rewind(sink: UploadDataSink) {
+                                position = 0
+                                sink.onRewindSucceeded()
+                            }
+                        },
+                        executor,
+                    )
+                    .build()
+
+                // Cancel the Cronet request if the coroutine is cancelled
+                continuation.invokeOnCancellation { request.cancel() }
+                request.start()
             }
         }
 

@@ -222,11 +222,46 @@ class MyVpnService : VpnService() {
     }
 
     /**
+     * Briefly establishes a VPN with a default route (0.0.0.0/0) and immediately
+     * closes it. This forces Android to see a network change for the default
+     * network, which causes apps (like Chrome) to drop all their existing
+     * TCP sockets and flush their DNS caches.
+     *
+     * Without this, since we only route DNS traffic (split tunnel), existing
+     * HTTP keep-alive connections to blocked domains would remain open.
+     */
+    private suspend fun flushSystemSockets() {
+        try {
+            val dummyFd = Builder()
+                .setSession("FreeBlockerVPN-Flush")
+                .addAddress("10.0.0.2", 32)
+                .addAddress("fd00::2", 128)
+                .addRoute("0.0.0.0", 0)
+                .addRoute("::", 0)
+                .setMtu(1500)
+                .establish()
+            
+            // Give Android enough time to register the default network
+            // and notify apps to tear down their existing sockets.
+            // Without this delay, the dummy VPN is closed too quickly
+            // for the ConnectivityService to broadcast the change.
+            kotlinx.coroutines.delay(1000)
+            
+            dummyFd?.close()
+            Log.i(TAG, "System sockets and DNS cache flushed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to flush system sockets", e)
+        }
+    }
+
+    /**
      * Builds and establishes the TUN interface to redirect DNS queries to [DnsProxyServer].
      * Reads whitelisted apps from [UserPreferences] and excludes them from the VPN
      * via [Builder.addDisallowedApplication].
      */
     private suspend fun buildTunInterface(): ParcelFileDescriptor? {
+        flushSystemSockets()
+
         val builder = Builder()
             .setSession("FreeBlockerVPN")
             // IPv4 Setup

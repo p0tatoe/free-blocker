@@ -93,6 +93,7 @@ class BlocklistFetcher {
 }
 
 class BlocklistRepository(
+    private val context: android.content.Context,
     private val dnsFilter: DnsFilter,
     private val userPreferences: UserPreferences,
     private val fetcher: BlocklistFetcher,
@@ -106,12 +107,34 @@ class BlocklistRepository(
     /**
      * Populates DnsFilter with blocklists, user rules, and whitelist rules
      */
-    suspend fun loadAndCompileBlocklists() = withContext(Dispatchers.IO) {
+    suspend fun loadAndCompileBlocklists() = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
 
         _state.value = BlocklistState.Loading
 
         try {
-            val compiled = HashSet<String>(250_000)
+            val cacheFile = java.io.File(context.cacheDir, "blocklist_cache.txt")
+            val manualBlocks = userPreferences.getManualBlockedDomains().map { it.lowercase() }
+            val whitelist = userPreferences.getWhitelistedDomains().map { it.lowercase() }.toSet()
+
+            // 1. Instant Arming: Load cached remote lists and manual rules immediately
+            val initialSet = HashSet<String>(250_000)
+            initialSet.addAll(manualBlocks)
+            
+            if (cacheFile.exists()) {
+                try {
+                    cacheFile.useLines { lines ->
+                        initialSet.addAll(lines)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to read blocklist cache", e)
+                }
+            }
+            initialSet.removeAll(whitelist)
+            dnsFilter.updateBlocklist(initialSet)
+            Log.i(TAG, "Instantly armed ${initialSet.size} domains from cache/manual rules")
+
+            // 2. Network Load: Fetch latest remote blocklists in the background
+            val remoteCompiled = HashSet<String>(250_000)
             val customUrls = userPreferences.getCustomSourceUrls()
             val disabledUrls = userPreferences.getDisabledBuiltInUrls()
 
@@ -119,25 +142,44 @@ class BlocklistRepository(
                 .filter { it.url !in disabledUrls } +
                 customUrls.map { FilterSource(it) }
 
-            coroutineScope {
+            kotlinx.coroutines.supervisorScope {
                 allSources
                     .filter { it.enabled }
-                    .map { source -> async { fetcher.fetch(source.url) } }
+                    .map { source -> 
+                        async { 
+                            try {
+                                fetcher.fetch(source.url)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to fetch source: ${source.url}", e)
+                                emptySet<String>()
+                            }
+                        } 
+                    }
                     .awaitAll()
-                    .forEach { compiled.addAll(it) }
+                    .forEach { remoteCompiled.addAll(it) }
             }
 
-            compiled.addAll(
-                userPreferences.getManualBlockedDomains().map { it.lowercase() }
-            )
+            // Save the newly fetched remote blocklists to the local cache
+            try {
+                cacheFile.bufferedWriter().use { writer ->
+                    remoteCompiled.forEach { 
+                        writer.write(it)
+                        writer.newLine()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to write blocklist cache", e)
+            }
 
-            compiled.removeAll(
-                userPreferences.getWhitelistedDomains().map { it.lowercase() }.toSet()
-            )
+            // 3. Final Merge: Apply the updated lists
+            val finalCompiled = HashSet<String>(remoteCompiled.size + manualBlocks.size)
+            finalCompiled.addAll(remoteCompiled)
+            finalCompiled.addAll(manualBlocks)
+            finalCompiled.removeAll(whitelist)
 
-            dnsFilter.updateBlocklist(compiled)
+            dnsFilter.updateBlocklist(finalCompiled)
 
-            _state.value = BlocklistState.Success(compiled.size)
+            _state.value = BlocklistState.Success(finalCompiled.size)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load blocklists", e)
             _state.value = BlocklistState.Error(e.message ?: "Unknown error")

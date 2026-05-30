@@ -20,6 +20,7 @@ object ServiceLocator {
         val appContext = context.applicationContext
         dnsFilter = DnsFilter()
         blocklistRepository = BlocklistRepository(
+            context         = appContext,
             dnsFilter       = dnsFilter,
             userPreferences = UserPreferences(appContext),
             fetcher         = BlocklistFetcher(),
