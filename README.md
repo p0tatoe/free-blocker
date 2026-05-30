@@ -1,10 +1,10 @@
 # FreeBlocker
 
-FreeBlocker is an open-source, local VPN-based DNS sinkhole for Android. It acts as a device-wide ad and tracker blocker by intercepting DNS queries locally and blocking those that match known tracking or advertising domains, without sending your traffic to an external filtering server.
+Free Block is a website blocker for Android that works through passing DNS queries through a local VPN. Users can manually enter websites to block, or load in entire blocklists from the internet, to block things like spam or ads.
 
 ## How it Works
 
-FreeBlocker uses Android's `VpnService` API to establish a local TUN interface. It redirects all device DNS traffic (IPv4 and IPv6) into this tunnel. 
+Free Block uses Android's `VpnService` API to establish a local TUN interface. It redirects all device DNS traffic (IPv4 and IPv6) into this tunnel. 
 
 1. **Traffic Interception:** The `TunPacketRouter` reads raw IP packets from the TUN interface.
 2. **DNS Extraction:** `IpPacketParser` parses these IP/UDP packets to extract raw DNS queries.
@@ -12,10 +12,6 @@ FreeBlocker uses Android's `VpnService` API to establish a local TUN interface. 
 4. **Resolution or Blocking:**
    - **Blocked:** If the domain matches a blocklist, FreeBlocker immediately responds with an `NXDOMAIN` (non-existent domain) error, preventing the ad/tracker from loading.
    - **Allowed:** If the domain is safe, `DnsProxyServer` forwards the query to an encrypted upstream DNS resolver using DNS-over-QUIC (DoQ) with a fallback to DNS-over-HTTPS (DoH). 
-
-## Architecture & Key Components
-
-The app follows a modern Android architecture using Jetpack Compose for the UI, Kotlin Coroutines/Flows for asynchronous programming, and DataStore for persistence.
 
 ### Core (`dev.michaelylee.freeblocker.core`)
 The heavy lifting of the VPN and packet processing happens here.
@@ -39,30 +35,11 @@ Built entirely in Jetpack Compose with Material 3.
 - `BlocklistsScreen.kt`: Allows users to manage built-in and custom blocklist source URLs.
 - `AppsScreen.kt`: App bypass management, where users can exclude specific installed apps from the VPN tunnel.
 
-## Building and Running
-
 ### Prerequisites
 - Android Studio Koala (or newer)
 - Minimum SDK: API 34 (Android 14)
 - Target SDK: API 37
 
-### Building
-Open the project in Android Studio and sync Gradle. You can build the project by clicking the **Run** button or executing the following command in the terminal:
-
-```bash
-./gradlew assembleDebug
-```
-
-### Required Permissions
-- `android.permission.BIND_VPN_SERVICE`: System-level permission to run a VPN.
-- `android.permission.INTERNET` & `ACCESS_NETWORK_STATE`: For fetching blocklists and forwarding allowed DNS queries upstream.
-- `android.permission.FOREGROUND_SERVICE` & `FOREGROUND_SERVICE_SPECIAL_USE`: Required to keep the VPN running in the background.
-- `android.permission.POST_NOTIFICATIONS`: To display the persistent VPN connection notification.
-- `android.permission.QUERY_ALL_PACKAGES`: To list installed apps for the VPN bypass (whitelist) feature.
-
-## Contributing
-
-When contributing to FreeBlocker, please keep the following in mind:
-- **Performance:** DNS resolution happens for almost every network request on the device. Hot paths in `IpPacketParser` and `DnsFilter` must be extremely efficient and avoid unnecessary memory allocations.
-- **Privacy:** FreeBlocker is designed to be a *local* sinkhole. It should never log queries to disk or send analytics containing user browsing data. Allowed queries must only be sent over encrypted transports (DoQ/DoH).
-- **Happy Eyeballs:** Upstream connections use a Happy Eyeballs-style race to ensure the fastest possible DNS resolution. Ensure new upstream features don't introduce blocking delays.
+## Planned Features
+- Support for other languages would be nice. 
+- We might want to switch from cronet DoH3 to something like Quiche or Quinn.

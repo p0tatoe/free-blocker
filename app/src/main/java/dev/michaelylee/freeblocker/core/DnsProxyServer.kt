@@ -114,7 +114,12 @@ class DnsProxyServer(
     fun updateUpstream(config: UpstreamConfig) {
         upstream = config
         upstreamClients.drain()
-        Log.i(TAG, "Upstream updated to $config — clients drained")
+        // Pre-warm the clients to avoid delay on first query
+        CoroutineScope(Dispatchers.IO).launch {
+            upstreamClients.cronetEngineFor(config)
+            upstreamClients.httpClientFor(config)
+        }
+        Log.i(TAG, "Upstream updated to $config — clients drained and warming up")
     }
 
     fun drainConnections() {
