@@ -12,6 +12,8 @@ class DnsFilter {
     @Volatile
     private var blocklist: Set<String> = emptySet()
 
+    var rustProxyCallback: ((List<String>) -> Unit)? = null
+
     /**
      * Domains whose blocking is temporarily paused.
      * Key = lowercased domain, Value = epoch-millis expiry time
@@ -27,6 +29,7 @@ class DnsFilter {
     fun updateBlocklist(newBlocklist: Set<String>) {
         this.blocklist = newBlocklist
         Log.d(TAG, "DnsFilter initialized with ${newBlocklist.size} static rules.")
+        rustProxyCallback?.invoke(blocklist.toList())
     }
 
     /**
@@ -40,6 +43,7 @@ class DnsFilter {
         if (cleaned.isNotEmpty()) {
             blocklist = blocklist + cleaned
             Log.d(TAG, "Added domain to live filter: $cleaned (total: ${blocklist.size})")
+            rustProxyCallback?.invoke(blocklist.toList())
         }
     }
 
@@ -54,6 +58,7 @@ class DnsFilter {
         if (cleaned.isNotEmpty()) {
             blocklist = blocklist - cleaned
             Log.d(TAG, "Removed domain from live filter: $cleaned (total: ${blocklist.size})")
+            rustProxyCallback?.invoke(blocklist.toList())
         }
     }
 
@@ -76,6 +81,7 @@ class DnsFilter {
             pausedDomains[cleaned] = expiresAt
             blocklist = blocklist - cleaned
             Log.d(TAG, "Paused domain: $cleaned until ${if (expiresAt == Long.MAX_VALUE) "indefinitely" else expiresAt}")
+            rustProxyCallback?.invoke(blocklist.toList())
         }
     }
 
@@ -90,6 +96,7 @@ class DnsFilter {
             pausedDomains.remove(cleaned)
             blocklist = blocklist + cleaned
             Log.d(TAG, "Resumed domain: $cleaned (total: ${blocklist.size})")
+            rustProxyCallback?.invoke(blocklist.toList())
         }
     }
 
@@ -111,18 +118,25 @@ class DnsFilter {
     fun shouldBlock(domain: String): Boolean {
         if (domain.isEmpty() || blocklist.isEmpty()) return false
 
-        var candidate = domain.lowercase().trim()
+        val candidate = domain.lowercase().trim()
 
-        while (candidate.contains(".")) {
-            if (blocklist.contains(candidate)) {
-                Log.i(TAG, "Blocked query for: $domain (matched rule: $candidate)")
+        var startIndex = 0
+        while (startIndex < candidate.length) {
+            val subDomain = if (startIndex == 0) candidate else candidate.substring(startIndex)
+
+            if (blocklist.contains(subDomain)) {
+                Log.i(TAG, "Blocked query for: $domain (matched rule: $subDomain)")
                 return true
             }
-            val next = candidate.substringAfter(".")
+
+            val dotIndex = candidate.indexOf('.', startIndex)
+            if (dotIndex == -1) break
+
             // Stop before we reach a bare TLD (e.g. "com") — no blocklist rule
             // will ever be just a TLD, and checking it is unnecessary work.
-            if (!next.contains(".")) break
-            candidate = next
+            if (candidate.indexOf('.', dotIndex + 1) == -1) break
+
+            startIndex = dotIndex + 1
         }
 
         return false
@@ -132,5 +146,8 @@ class DnsFilter {
         this.blocklist = emptySet()
         pausedDomains.clear()
         Log.d(TAG, "DnsFilter memory cleared.")
+        rustProxyCallback?.invoke(blocklist.toList())
     }
+
+    fun getBlocklist(): List<String> = blocklist.toList()
 }

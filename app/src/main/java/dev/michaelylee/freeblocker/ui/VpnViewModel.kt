@@ -5,7 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.michaelylee.freeblocker.ServiceLocator
-import dev.michaelylee.freeblocker.core.DnsProxyServer
+import dev.michaelylee.freeblocker.core.UpstreamConfig
 import dev.michaelylee.freeblocker.core.MyVpnService
 import dev.michaelylee.freeblocker.data.BlocklistRepository
 import dev.michaelylee.freeblocker.data.BlocklistState
@@ -155,7 +155,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
      * settings screen. [MyVpnService] reads this independently via DataStore
      * on start — the ViewModel doesn't push it to the service directly.
      */
-    val upstreamConfig: StateFlow<DnsProxyServer.UpstreamConfig> = prefs.upstreamConfigFlow
+    val upstreamConfig: StateFlow<UpstreamConfig> = prefs.upstreamConfigFlow
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
@@ -168,7 +168,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
      * If the VPN is currently running, a restart is required for the change to
      * take effect. The UI should surface this via [pendingRestartReason].
      */
-    fun setUpstreamConfig(config: DnsProxyServer.UpstreamConfig) {
+    fun setUpstreamConfig(config: UpstreamConfig) {
         viewModelScope.launch {
             prefs.setUpstreamConfig(config)
             if (isVpnEnabled.value) {

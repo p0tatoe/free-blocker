@@ -1,6 +1,7 @@
 # FreeBlocker
 
 Free Block is a website blocker for Android that works through passing DNS queries through a local VPN. Users can manually enter websites to block, or load in entire blocklists from the internet, to block things like spam or ads.
+DISCLOSURE: I used a lot of AI to make this.
 
 ## How it Works
 

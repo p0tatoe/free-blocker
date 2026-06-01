@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import uniffi.free_block_rust.DnsProxy
 import dev.michaelylee.freeblocker.MainActivity
 import dev.michaelylee.freeblocker.ServiceLocator
 import dev.michaelylee.freeblocker.data.BlocklistFetcher
@@ -64,12 +65,8 @@ class MyVpnService : VpnService() {
 
     private val dnsFilter get() = ServiceLocator.dnsFilter
 
-    private val dnsProxy by lazy {
-        DnsProxyServer(
-            context   = applicationContext,
-            dnsFilter = dnsFilter,
-        )
-    }
+    private var dnsProxy: DnsProxy? = null
+    private var isBlockingEnabled = true
 
     private val blocklistRepository get() = ServiceLocator.blocklistRepository
 
@@ -85,7 +82,12 @@ class MyVpnService : VpnService() {
             }
             ACTION_SET_BLOCKING -> {
                 val enabled = intent.getBooleanExtra(EXTRA_BLOCKING_ENABLED, true)
-                dnsProxy.isBlockingEnabled = enabled
+                isBlockingEnabled = enabled
+                if (enabled) {
+                    dnsProxy?.updateBlocklist(dnsFilter.getBlocklist())
+                } else {
+                    dnsProxy?.updateBlocklist(emptyList())
+                }
                 Log.i(TAG, "Blocking ${if (enabled) "enabled" else "disabled"}")
 
                 // When re-enabling blocking, rebuild the TUN interface to flush
@@ -136,12 +138,12 @@ class MyVpnService : VpnService() {
 
                 // Apply saved upstream config
                 val savedUpstream = userPreferences.getUpstreamConfig()
-                dnsProxy.updateUpstream(savedUpstream)
+                // Upstream config is now handled at proxy start
                 Log.i(TAG, "Upstream initialised: $savedUpstream")
 
                 // Restore blocking enabled state
-                dnsProxy.isBlockingEnabled = userPreferences.isBlockingEnabledFlow.first()
-                Log.i(TAG, "Blocking enabled: ${dnsProxy.isBlockingEnabled}")
+                isBlockingEnabled = userPreferences.isBlockingEnabledFlow.first()
+                Log.i(TAG, "Blocking enabled: $isBlockingEnabled")
 
                 // Load blocklists in the background so blocking starts
                 // as soon as the download + compile finishes.
@@ -167,7 +169,7 @@ class MyVpnService : VpnService() {
         Log.i(TAG, "Stopping VPN engine…")
 
         unregisterNetworkCallback()
-        dnsProxy.stop()
+        dnsProxy = null
 
         try {
             vpnInterface?.close()
@@ -184,16 +186,22 @@ class MyVpnService : VpnService() {
     }
 
     private fun startTunLoop() {
-        val fd = vpnInterface?.fileDescriptor ?: return
-
-        val router = TunPacketRouter(
-            tunInput   = FileInputStream(fd),
-            tunOutput  = FileOutputStream(fd),
-            dnsHandler = { queryBytes -> dnsProxy.handleDnsQuery(queryBytes) },
-        )
+        val fd = vpnInterface?.fd ?: return
 
         serviceScope.launch {
-            router.run()
+            val upstreamConfig = userPreferences.getUpstreamConfig()
+            dnsProxy = DnsProxy(fd, upstreamConfig.host, upstreamConfig.sniHostname)
+            
+            dnsFilter.rustProxyCallback = { domains ->
+                if (isBlockingEnabled) {
+                    dnsProxy?.updateBlocklist(domains)
+                }
+            }
+            if (isBlockingEnabled) {
+                dnsProxy?.updateBlocklist(dnsFilter.getBlocklist())
+            }
+
+            dnsProxy?.start()
         }
     }
 
@@ -275,8 +283,8 @@ class MyVpnService : VpnService() {
             // The Silver Bullet: Bind the entire VPN process to the physical network.
             // This natively forces all C++ (Cronet) and Java (OkHttp) sockets to bypass the VPN.
             connectivityManager?.bindProcessToNetwork(network)
-
-            dnsProxy.drainConnections()
+            
+            // Connections will be re-established lazily on next query
         }
 
         override fun onLost(network: Network) {

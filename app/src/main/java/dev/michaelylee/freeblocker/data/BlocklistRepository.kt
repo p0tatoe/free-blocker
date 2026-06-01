@@ -39,6 +39,10 @@ class DefaultSourceProvider : SourceProvider {
 }
 
 class FilterParser {
+    companion object {
+        private val WHITESPACE_REGEX = Regex("\\s+")
+    }
+
     /**
      * Normalizes blocking rules: Adblock syntax (`||badsite.com^`) etc.
      * Returns null for comment lines, empty lines, and invalid entries.
@@ -63,7 +67,7 @@ class FilterParser {
         if (line.startsWith("*.")) line = line.substring(2)
 
         // Split tokens to break up standard hosts records (IP <space> Host)
-        val segments = line.split(Regex("\\s+"))
+        val segments = line.split(WHITESPACE_REGEX)
         val candidate = if (segments.size >= 2) segments[1] else segments[0]
 
         val cleaned = candidate.lowercase(Locale.ROOT).trim()
