@@ -1,0 +1,24 @@
+[package]
+name = "free_block_rust"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi-bindgen.rs"
+
+[dependencies]
+uniffi = { version = "0.31", features = ["tokio", "cli"] }
+tokio = { version = "1", features = ["full"] }
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+webpki-roots = "0.26"
+hickory-proto = "0.24"
+etherparse = "0.14"
+radix_trie = "0.2"
+lru = "0.12"
+libc = "0.2"
+bytes = "1"
