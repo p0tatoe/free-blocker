@@ -65,9 +65,8 @@ class MainActivity : ComponentActivity() {
         // On Android 13+ we must ask the user to allow notifications before the
         // foreground-service notification will appear. If already granted (or on
         // older API levels), skip straight to starting the VPN.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {

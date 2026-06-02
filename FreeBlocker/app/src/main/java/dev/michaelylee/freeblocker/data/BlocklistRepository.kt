@@ -26,17 +26,7 @@ data class FilterSource(
     val enabled: Boolean = true
 )
 
-interface SourceProvider {
-    fun getSources(): List<FilterSource>
-}
 
-class DefaultSourceProvider : SourceProvider {
-    override fun getSources(): List<FilterSource> = listOf(
-        FilterSource("https://pgl.yoyo.org/adservers/serverlist.php"),
-        FilterSource("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
-        FilterSource("https://big.oisd.nl/domainswild")
-    )
-}
 
 class FilterParser {
     companion object {
@@ -100,8 +90,7 @@ class BlocklistRepository(
     private val context: android.content.Context,
     private val dnsFilter: DnsFilter,
     private val userPreferences: UserPreferences,
-    private val fetcher: BlocklistFetcher,
-    private val sourceProvider: SourceProvider = DefaultSourceProvider()
+    private val fetcher: BlocklistFetcher
 ) {
     private val TAG = "BlocklistRepository"
 
@@ -140,11 +129,8 @@ class BlocklistRepository(
             // 2. Network Load: Fetch latest remote blocklists in the background
             val remoteCompiled = HashSet<String>(250_000)
             val customUrls = userPreferences.getCustomSourceUrls()
-            val disabledUrls = userPreferences.getDisabledBuiltInUrls()
 
-            val allSources = sourceProvider.getSources()
-                .filter { it.url !in disabledUrls } +
-                customUrls.map { FilterSource(it) }
+            val allSources = customUrls.map { FilterSource(it) }
 
             kotlinx.coroutines.supervisorScope {
                 allSources
@@ -183,7 +169,7 @@ class BlocklistRepository(
 
             dnsFilter.updateBlocklist(finalCompiled)
 
-            _state.value = BlocklistState.Success(finalCompiled.size)
+            _state.value = BlocklistState.Success(remoteCompiled.size)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load blocklists", e)
             _state.value = BlocklistState.Error(e.message ?: "Unknown error")

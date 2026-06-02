@@ -4,7 +4,6 @@ import android.content.Context
 import dev.michaelylee.freeblocker.core.DnsFilter
 import dev.michaelylee.freeblocker.data.BlocklistFetcher
 import dev.michaelylee.freeblocker.data.BlocklistRepository
-import dev.michaelylee.freeblocker.data.DefaultSourceProvider
 import dev.michaelylee.freeblocker.data.UserPreferences
 
 object ServiceLocator {
@@ -23,8 +22,7 @@ object ServiceLocator {
             context         = appContext,
             dnsFilter       = dnsFilter,
             userPreferences = UserPreferences(appContext),
-            fetcher         = BlocklistFetcher(),
-            sourceProvider  = DefaultSourceProvider(),
+            fetcher         = BlocklistFetcher()
         )
     }
 }

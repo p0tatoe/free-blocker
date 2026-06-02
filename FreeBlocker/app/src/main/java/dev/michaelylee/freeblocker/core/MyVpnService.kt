@@ -20,7 +20,6 @@ import dev.michaelylee.freeblocker.ServiceLocator
 import dev.michaelylee.freeblocker.data.BlocklistFetcher
 import dev.michaelylee.freeblocker.data.BlocklistRepository
 import dev.michaelylee.freeblocker.data.BlocklistState
-import dev.michaelylee.freeblocker.data.DefaultSourceProvider
 import dev.michaelylee.freeblocker.data.UserPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

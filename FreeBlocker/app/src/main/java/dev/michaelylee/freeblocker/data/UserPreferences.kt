@@ -26,8 +26,7 @@ class UserPreferences(private val context: Context) {
         val MANUAL_BLOCKED         = stringSetPreferencesKey("manual_blocked_domains")
         val WHITELISTED            = stringSetPreferencesKey("whitelisted_domains")
         val CUSTOM_SOURCE_URLS     = stringSetPreferencesKey("custom_source_urls")
-        /** URLs from the built-in defaults that the user has removed. */
-        val DISABLED_BUILTIN_URLS  = stringSetPreferencesKey("disabled_builtin_urls")
+
         /**
          * Stores the active upstream as a single encoded string.
          * Encoding format is defined in [UpstreamConfig.encode] /  [UpstreamConfig.decode].
@@ -145,29 +144,7 @@ class UserPreferences(private val context: Context) {
         }
     }
 
-    // ── Disabled built-in sources ─────────────────────────────────────────────
 
-    /** URLs from the built-in defaults that the user has explicitly removed. */
-    val disabledBuiltInUrlsFlow: Flow<Set<String>> = context.dataStore.data
-        .catchIo(emptyPreferences())
-        .map { it[Keys.DISABLED_BUILTIN_URLS] ?: emptySet() }
-
-    suspend fun getDisabledBuiltInUrls(): Set<String> =
-        disabledBuiltInUrlsFlow.first()
-
-    suspend fun disableBuiltInUrl(url: String) {
-        context.dataStore.edit { prefs ->
-            val current = prefs[Keys.DISABLED_BUILTIN_URLS] ?: emptySet()
-            prefs[Keys.DISABLED_BUILTIN_URLS] = current + url.trim()
-        }
-    }
-
-    suspend fun enableBuiltInUrl(url: String) {
-        context.dataStore.edit { prefs ->
-            val current = prefs[Keys.DISABLED_BUILTIN_URLS] ?: emptySet()
-            prefs[Keys.DISABLED_BUILTIN_URLS] = current - url.trim()
-        }
-    }
 
     val isBlockingEnabledFlow: Flow<Boolean> = context.dataStore.data
         .catchIo(emptyPreferences())

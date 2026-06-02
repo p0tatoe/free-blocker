@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -76,8 +77,42 @@ fun BlockedWebsitesScreen(
     val upstream          by viewModel.upstreamConfig.collectAsState()
     val manualBlocked     by viewModel.manualBlockedDomains.collectAsState()
     val pausedDomains     by viewModel.pausedDomains.collectAsState()
+    val customUrls        by viewModel.customSourceUrls.collectAsState()
     val snackbarHost      = remember { SnackbarHostState() }
     var isListVisible     by remember { mutableStateOf(true) }
+    var showInfoDialog    by remember { mutableStateOf(false) }
+
+    if (showInfoDialog) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showInfoDialog = false }) {
+            androidx.compose.material3.Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = """
+                            The VPN automatically starts with the app and runs in the background. To stop the app completely, press the Stop VPN & Close button.
+                            
+                            This app will not work properly with private DNS enabled. If you have not touched this Android setting before, you don't need to worry about this.
+                            
+                            If the app stops working after long periods it could be due to battery optimization. Consider changing this under Settings > Apps > Free Blocker to Unrestricted.
+                        """.trimIndent(),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        androidx.compose.material3.TextButton(onClick = { showInfoDialog = false }) {
+                            Text("OK")
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(pendingRestart) {
         if (pendingRestart != null) {
@@ -123,6 +158,18 @@ fun BlockedWebsitesScreen(
                             fontFamily = dev.michaelylee.freeblocker.ui.theme.RighteousFamily
                         )
                     )
+                    Spacer(Modifier.weight(1f))
+                    androidx.compose.material3.IconButton(
+                        onClick = { showInfoDialog = true },
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "Info",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
             }
 
@@ -172,11 +219,14 @@ fun BlockedWebsitesScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    val blocklistText = when (val s = blocklistState) {
-                        is BlocklistState.Idle    -> ""
-                        is BlocklistState.Loading -> "updating blocklists…"
-                        is BlocklistState.Success -> "${s.totalDomains} domains blocked from blocklists"
-                        is BlocklistState.Error   -> "⚠ error updating blocklists"
+                    val blocklistText = if (customUrls.isNotEmpty()) {
+                        when (blocklistState) {
+                            is BlocklistState.Loading -> "updating blocklists…"
+                            is BlocklistState.Error   -> "⚠ error updating blocklists"
+                            else                      -> ""
+                        }
+                    } else {
+                        ""
                     }
                     if (blocklistText.isNotEmpty()) {
                         Text(

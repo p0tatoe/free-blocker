@@ -392,41 +392,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { prefs.removeCustomSourceUrl(url) }
     }
 
-    // -------------------------------------------------------------------------
-    // Built-in source toggling
-    // -------------------------------------------------------------------------
 
-    /**
-     * Built-in URLs that the user has explicitly removed. The UI uses this
-     * to show all three default sources as deletable list items.
-     */
-    val disabledBuiltInUrls: StateFlow<Set<String>> = prefs.disabledBuiltInUrlsFlow
-        .stateIn(
-            scope        = viewModelScope,
-            started      = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptySet(),
-        )
-
-    /**
-     * Removes a built-in source. Marks a pending restart so the UI can prompt
-     * the user to refresh the blocklist for the change to take effect.
-     */
-    fun removeBuiltInSource(url: String) {
-        viewModelScope.launch {
-            prefs.disableBuiltInUrl(url)
-            _pendingRestartReason.update { PendingRestartReason.UPSTREAM_CHANGED }
-        }
-    }
-
-    /**
-     * Re-enables a previously removed built-in source and marks a pending restart.
-     */
-    fun restoreBuiltInSource(url: String) {
-        viewModelScope.launch {
-            prefs.enableBuiltInUrl(url)
-            _pendingRestartReason.update { PendingRestartReason.UPSTREAM_CHANGED }
-        }
-    }
 
     // -------------------------------------------------------------------------
     // Blocklist refresh

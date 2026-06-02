@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.michaelylee.freeblocker.data.BlocklistState
-import dev.michaelylee.freeblocker.data.DefaultSourceProvider
 
 @Composable
 fun BlocklistsScreen(
@@ -40,8 +41,38 @@ fun BlocklistsScreen(
 ) {
     val blocklistState by viewModel.blocklistState.collectAsState()
     val customUrls     by viewModel.customSourceUrls.collectAsState()
-    val disabledUrls   by viewModel.disabledBuiltInUrls.collectAsState()
-    val builtInSources = DefaultSourceProvider().getSources()
+
+    var showInfoDialog by remember { mutableStateOf(false) }
+
+    if (showInfoDialog) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showInfoDialog = false }) {
+            androidx.compose.material3.Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = """
+                            We use AdGuard's DNS servers, which blocks most ads by default.
+                            
+                            You can also add your own blocklist URLs here.
+                        """.trimIndent(),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        androidx.compose.material3.TextButton(onClick = { showInfoDialog = false }) {
+                            Text("OK")
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     LazyColumn(
         modifier            = modifier
@@ -54,16 +85,32 @@ fun BlocklistsScreen(
         item {
             Spacer(Modifier.height(16.dp))
             
-            Text(
-                text = "Blocklist Sources",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Blocklist Sources",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(Modifier.weight(1f))
+                androidx.compose.material3.IconButton(
+                    onClick = { showInfoDialog = true },
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = "Info",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
 
             val stateLabel = when (val s = blocklistState) {
                 is BlocklistState.Idle    -> "Blocklist not loaded"
                 is BlocklistState.Loading -> "Updating blocklist…"
-                is BlocklistState.Success -> "${s.totalDomains} domains loaded"
+                is BlocklistState.Success -> "${s.totalDomains} domains loaded from blocklists"
                 is BlocklistState.Error   -> "⚠ Error: ${s.message}"
             }
 
@@ -90,90 +137,11 @@ fun BlocklistsScreen(
                         "Refresh Blocklists"
                 )
             }
-
-            Spacer(Modifier.height(24.dp))
-        }
-
-        // ── Default sources ───────────────────────────────────────────────────
-        item {
-            Text(
-                text     = "Default Sources",
-                style    = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-        }
-
-        items(builtInSources, key = { "builtin_${it.url}" }) { source ->
-            val isDisabled = source.url in disabledUrls
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier          = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-            ) {
-                var isExpanded by remember { mutableStateOf(false) }
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { isExpanded = !isExpanded }
-                ) {
-                    Text(
-                        text  = source.url
-                            .removePrefix("https://")
-                            .substringBefore("/"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isDisabled)
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text  = source.url,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (isExpanded) Int.MAX_VALUE else 1,
-                        overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                    if (isDisabled) {
-                        Text(
-                            text  = "Disabled",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-                if (isDisabled) {
-                    IconButton(onClick = {
-                        viewModel.restoreBuiltInSource(source.url)
-                        viewModel.refreshBlocklists()
-                    }) {
-                        Icon(
-                            Icons.Default.Restore,
-                            contentDescription = "Restore",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                } else {
-                    IconButton(onClick = {
-                        viewModel.removeBuiltInSource(source.url)
-                        viewModel.refreshBlocklists()
-                    }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove",
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-            }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
         }
 
         // ── Custom sources ────────────────────────────────────────────────────
         item {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 text     = "Custom Sources",
                 style    = MaterialTheme.typography.titleSmall,

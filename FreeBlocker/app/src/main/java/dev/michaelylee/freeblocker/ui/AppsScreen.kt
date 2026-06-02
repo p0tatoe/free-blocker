@@ -24,12 +24,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -150,7 +155,15 @@ fun AppsScreen(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { scaffoldPadding ->
+        Column(modifier = Modifier.fillMaxSize().padding(scaffoldPadding)) {
         // ── Header ────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
@@ -229,11 +242,19 @@ fun AppsScreen(
                         isWhitelisted = app.packageName in whitelistedApps,
                         onToggle      = { checked ->
                             viewModel.setAppWhitelisted(app.packageName, checked)
+                            coroutineScope.launch {
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                snackbarHostState.showSnackbar(
+                                    message = if (checked) "${app.label} added to whitelist" else "${app.label} removed from whitelist",
+                                    duration = androidx.compose.material3.SnackbarDuration.Short
+                                )
+                            }
                         },
                     )
                 }
             }
         }
+    }
     }
 }
 
@@ -246,6 +267,7 @@ private fun AppRow(
     Row(
         modifier            = Modifier
             .fillMaxWidth()
+            .clickable { onToggle(!isWhitelisted) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment   = Alignment.CenterVertically,
     ) {
@@ -276,9 +298,9 @@ private fun AppRow(
 
         Spacer(Modifier.width(8.dp))
 
-        Switch(
+        Checkbox(
             checked    = isWhitelisted,
-            onCheckedChange = onToggle,
+            onCheckedChange = null,
         )
     }
 }
