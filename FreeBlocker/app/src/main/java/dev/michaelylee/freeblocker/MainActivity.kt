@@ -14,7 +14,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -96,8 +96,8 @@ class MainActivity : ComponentActivity() {
                             NavigationBarItem(
                                 selected = selectedTab == 2,
                                 onClick  = { selectedTab = 2 },
-                                icon     = { Icon(Icons.Default.PhoneAndroid, contentDescription = "Allowed") },
-                                label    = { Text("Allowed") },
+                                icon     = { Icon(Icons.Default.Radar, contentDescription = "Targets") },
+                                label    = { Text("Targets") },
                             )
                         }
                     }

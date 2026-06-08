@@ -28,8 +28,8 @@ class DnsFilter {
 
     @Synchronized
     fun updateBlocklist(newBlocklist: Set<String>) {
-        this.blocklist = newBlocklist
-        Log.d(TAG, "DnsFilter initialized with ${newBlocklist.size} static rules.")
+        this.blocklist = newBlocklist.filter { it.isNotBlank() }.toSet()
+        Log.d(TAG, "DnsFilter initialized with ${this.blocklist.size} static rules.")
         rustProxyCallback?.invoke(blocklist.toList())
     }
 

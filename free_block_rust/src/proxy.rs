@@ -76,15 +76,13 @@ pub fn to_trie_key(name: &[u8]) -> Vec<u8> {
 pub fn create_null_response(sliced: &SlicedPacket, req_payload: &[u8]) -> Option<Vec<u8>> {
     if req_payload.len() < 12 { return None; }
 
-    // Walk past the QNAME to locate QTYPE
     let mut idx = 12;
     while idx < req_payload.len() {
         let len = req_payload[idx] as usize;
         if len == 0 { idx += 1; break; }
         idx += len + 1;
     }
-    if idx + 2 > req_payload.len() { return None; }
-    let qtype = u16::from_be_bytes([req_payload[idx], req_payload[idx + 1]]);
+    if idx + 4 > req_payload.len() { return None; }
 
     let builder = match sliced.net.as_ref()? {
         etherparse::InternetSlice::Ipv4(ipv4) => {
@@ -103,44 +101,36 @@ pub fn create_null_response(sliced: &SlicedPacket, req_payload: &[u8]) -> Option
 
     let builder = builder.udp(udp.destination_port(), udp.source_port());
 
-    // Build DNS response (Standard query response, No error)
-    let mut dns_resp = req_payload.to_vec();
-    dns_resp[2] |= 0x80; // QR = 1 (Response)
+    // Copy only Header + Question to avoid invalidating the packet if it had OPT records
+    let mut dns_resp = req_payload[0..idx+4].to_vec();
 
-    match qtype {
-        1 => {
-            // Type A — answer with 0.0.0.0
-            dns_resp[6] = 0;
-            dns_resp[7] = 1; // ANCOUNT = 1
-            dns_resp.extend_from_slice(&[
-                0xC0, 0x0C,             // Name pointer to question
-                0x00, 0x01,             // Type A
-                0x00, 0x01,             // Class IN
-                0x00, 0x00, 0x01, 0x2C, // TTL 300
-                0x00, 0x04,             // RDLENGTH 4
-                0, 0, 0, 0,             // 0.0.0.0
-            ]);
-        }
-        28 => {
-            // Type AAAA — answer with ::
-            dns_resp[6] = 0;
-            dns_resp[7] = 1; // ANCOUNT = 1
-            dns_resp.extend_from_slice(&[
-                0xC0, 0x0C,             // Name pointer to question
-                0x00, 0x1C,             // Type AAAA
-                0x00, 0x01,             // Class IN
-                0x00, 0x00, 0x01, 0x2C, // TTL 300
-                0x00, 0x10,             // RDLENGTH 16
-                0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, // ::
-            ]);
-        }
-        _ => {
-            // Other types — empty answer (NOERROR, no records)
-            dns_resp[6] = 0;
-            dns_resp[7] = 0; // ANCOUNT = 0
-        }
-    }
+    // Set Flags: QR=1 (Response), AA=1 (Authoritative)
+    dns_resp[2] |= 0x84; 
+    // Set Flags: RA=1 (Recursion Available), RCODE=3 (NXDOMAIN)
+    dns_resp[3] |= 0x83;
+
+    // ANCOUNT = 0
+    dns_resp[6] = 0; dns_resp[7] = 0;
+    // NSCOUNT = 1 (SOA)
+    dns_resp[8] = 0; dns_resp[9] = 1;
+    // ARCOUNT = 0
+    dns_resp[10] = 0; dns_resp[11] = 0;
+
+    // Append SOA record
+    dns_resp.extend_from_slice(&[
+        0xC0, 0x0C,             // Name (Pointer to Question)
+        0x00, 0x06,             // Type SOA
+        0x00, 0x01,             // Class IN
+        0x00, 0x00, 0x00, 0x01, // TTL 1 second
+        0x00, 0x16,             // RDLENGTH 22 bytes
+        0x00,                   // MNAME (root)
+        0x00,                   // RNAME (root)
+        0x00, 0x00, 0x00, 0x00, // Serial
+        0x00, 0x00, 0x00, 0x00, // Refresh
+        0x00, 0x00, 0x00, 0x00, // Retry
+        0x00, 0x00, 0x00, 0x00, // Expire
+        0x00, 0x00, 0x00, 0x01, // Minimum TTL 1 second
+    ]);
 
     let mut result = Vec::with_capacity(builder.size(dns_resp.len()));
     builder.write(&mut result, &dns_resp).ok()?;

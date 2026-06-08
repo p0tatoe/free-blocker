@@ -228,6 +228,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         // Push to the live DNS filter immediately so blocking takes effect
         // without waiting for a full blocklist refresh.
         ServiceLocator.dnsFilter.addDomain(cleaned)
+        flushDnsCache()
     }
 
     fun removeManualBlockedDomain(domain: String) {
@@ -243,6 +244,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         ServiceLocator.dnsFilter.removeDomain(cleaned)
         cancelPauseTimer(cleaned)
         _pausedDomains.update { it - cleaned }
+        flushDnsCache()
     }
 
     // -------------------------------------------------------------------------
@@ -283,6 +285,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         if (durationMs != null) {
             schedulePauseTimer(cleaned, durationMs)
         }
+        flushDnsCache()
     }
 
     /**
@@ -301,6 +304,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         _pausedDomains.update { it - cleaned }
 
         cancelPauseTimer(cleaned)
+        flushDnsCache()
     }
 
     private fun schedulePauseTimer(domain: String, delayMs: Long) {
@@ -333,6 +337,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         // Immediately remove from the live filter so the domain is
         // unblocked without waiting for a full blocklist refresh.
         ServiceLocator.dnsFilter.removeDomain(cleaned)
+        flushDnsCache()
     }
 
     fun removeWhitelistedDomain(domain: String) {
@@ -342,6 +347,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         // If it wasn't in any blocklist this is a harmless no-op since
         // shouldBlock() only matches known domains.
         ServiceLocator.dnsFilter.addDomain(cleaned)
+        flushDnsCache()
     }
 
     // -------------------------------------------------------------------------
@@ -372,15 +378,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 prefs.removeFilteredApp(packageName)
             }
-            if (isVpnEnabled.value) {
-                val serviceIntent = Intent(getApplication(), MyVpnService::class.java).apply {
-                    action = MyVpnService.ACTION_FLUSH_DNS_CACHE
-                }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    getApplication<Application>().startForegroundService(serviceIntent)
-                } else {
-                    getApplication<Application>().startService(serviceIntent)
-                }
+            flushDnsCache()
+        }
+    }
+
+    private fun flushDnsCache() {
+        if (isVpnEnabled.value) {
+            val serviceIntent = Intent(getApplication(), MyVpnService::class.java).apply {
+                action = MyVpnService.ACTION_FLUSH_DNS_CACHE
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                getApplication<Application>().startForegroundService(serviceIntent)
+            } else {
+                getApplication<Application>().startService(serviceIntent)
             }
         }
     }

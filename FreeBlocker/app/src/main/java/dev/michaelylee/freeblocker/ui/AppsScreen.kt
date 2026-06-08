@@ -106,14 +106,10 @@ fun AppsScreen(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var showSystemApps by remember { mutableStateOf(false) }
 
-    val displayedApps = remember(installedApps, searchQuery, showSystemApps, filteredApps) {
+    val displayedApps = remember(installedApps, searchQuery, filteredApps) {
         installedApps
             .filter { app ->
-                // Always show targeted apps, even if they're system apps
-                val isFiltered = app.packageName in filteredApps
-                if (!showSystemApps && app.isSystemApp && !isFiltered) return@filter false
                 if (searchQuery.isBlank()) return@filter true
                 app.label.contains(searchQuery, ignoreCase = true) ||
                     app.packageName.contains(searchQuery, ignoreCase = true)
@@ -231,17 +227,7 @@ fun AppsScreen(
             }
         }
 
-        // ── Filter chips ──────────────────────────────────────────────────
-        Row(
-            modifier            = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = showSystemApps,
-                onClick  = { showSystemApps = !showSystemApps },
-                label    = { Text("Show system apps") },
-            )
-        }
+
 
         HorizontalDivider()
 
@@ -253,7 +239,7 @@ fun AppsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text  = "Loading apps…",
+                    text  = "Loading apps... This may take a few seconds.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

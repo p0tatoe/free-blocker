@@ -6,7 +6,7 @@ use quic::DoqEndpoint;
 #[tokio::main]
 async fn main() {
     println!("Connecting to DoQ...");
-    let endpoint = DoqEndpoint::new().unwrap();
+    let endpoint = DoqEndpoint::new_v4().unwrap();
     let doq = endpoint.connect("1.1.1.1", "cloudflare-dns.com").await.unwrap();
     println!("Connected! Sending query...");
 

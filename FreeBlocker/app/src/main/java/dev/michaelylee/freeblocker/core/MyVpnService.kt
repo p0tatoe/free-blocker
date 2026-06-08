@@ -127,6 +127,9 @@ class MyVpnService : VpnService() {
 
         serviceScope.launch {
             try {
+                connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
+                activePhysicalNetwork = connectivityManager?.activeNetwork
+
                 vpnInterface = buildTunInterface() ?: run {
                     Log.e(TAG, "Failed to establish TUN interface")
                     stopVpn()
@@ -192,37 +195,52 @@ class MyVpnService : VpnService() {
         serviceScope.launch {
             val upstreamConfig = userPreferences.getUpstreamConfig()
             
-            // Resolve IP outside the VPN tunnel using physical network to avoid loop
-            var resolvedIp = upstreamConfig.host
+            var upstreamV4: String? = null
+            var upstreamV6: String? = null
+            
             try {
                 val activeNetwork = connectivityManager?.activeNetwork
-                if (activeNetwork != null) {
-                    val addresses = activeNetwork.getAllByName(upstreamConfig.host)
-                    if (addresses.isNotEmpty()) {
-                        resolvedIp = addresses[0].hostAddress ?: upstreamConfig.host
-                    }
+                val addresses = if (activeNetwork != null) {
+                    activeNetwork.getAllByName(upstreamConfig.host)
                 } else {
-                    val addresses = java.net.InetAddress.getAllByName(upstreamConfig.host)
-                    if (addresses.isNotEmpty()) {
-                        resolvedIp = addresses[0].hostAddress ?: upstreamConfig.host
-                    }
+                    java.net.InetAddress.getAllByName(upstreamConfig.host)
                 }
+                
+                upstreamV4 = addresses.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+                upstreamV6 = addresses.firstOrNull { it is java.net.Inet6Address }?.hostAddress
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to resolve upstream IP", e)
             }
-
-            Log.i(TAG, "Resolved upstream ${upstreamConfig.host} to $resolvedIp")
             
-            // Pass resolved IP, but keep SNI hostname for the QUIC handshake
-            dnsProxy = DnsProxy(fd, resolvedIp, upstreamConfig.sniHostname)
+            // Fallbacks in case it's already an IP string
+            if (upstreamV4 == null && upstreamV6 == null) {
+                if (upstreamConfig.host.contains(":")) {
+                    upstreamV6 = upstreamConfig.host
+                } else {
+                    upstreamV4 = upstreamConfig.host
+                }
+            }
+
+            Log.i(TAG, "Resolved upstream ${upstreamConfig.host} to v4: $upstreamV4, v6: $upstreamV6")
+            
+            // Pass resolved IPs, but keep SNI hostname for the QUIC handshake
+            dnsProxy = DnsProxy(fd, upstreamV4, upstreamV6, upstreamConfig.sniHostname)
             
             val proxy = dnsProxy
             if (proxy != null) {
-                val quicFd = proxy.getQuicFd()
-                if (protect(quicFd)) {
-                    Log.i(TAG, "Protected QUIC socket (fd: $quicFd) from VPN tunnel")
-                } else {
-                    Log.e(TAG, "Failed to protect QUIC socket (fd: $quicFd) from VPN tunnel")
+                proxy.getQuicFdV4()?.let { quicFd ->
+                    if (protect(quicFd)) {
+                        Log.i(TAG, "Protected IPv4 QUIC socket (fd: $quicFd) from VPN tunnel")
+                    } else {
+                        Log.e(TAG, "Failed to protect IPv4 QUIC socket (fd: $quicFd) from VPN tunnel")
+                    }
+                }
+                proxy.getQuicFdV6()?.let { quicFd ->
+                    if (protect(quicFd)) {
+                        Log.i(TAG, "Protected IPv6 QUIC socket (fd: $quicFd) from VPN tunnel")
+                    } else {
+                        Log.e(TAG, "Failed to protect IPv6 QUIC socket (fd: $quicFd) from VPN tunnel")
+                    }
                 }
             }
             
@@ -299,15 +317,21 @@ class MyVpnService : VpnService() {
             .addDnsServer("10.0.0.1")
             .addRoute("10.0.0.1", 32)  // Route DNS traffic through TUN to our packet router
 
-            // Allow IPv6 to bypass the VPN natively without advertising fake IPv6 capabilities
-            .allowFamily(android.system.OsConstants.AF_INET6)
+            // IPv6 Setup
+            .addAddress("fd00:1::2", 128)
+            .addDnsServer("fd00:1::1")
+            .addRoute("fd00:1::1", 128)
 
             .setMtu(1500)
 
         // Set underlying network explicitly to inherit NET_CAPABILITY_INTERNET immediately
-        val activeNetwork = connectivityManager?.activeNetwork
-        if (activeNetwork != null) {
-            builder.setUnderlyingNetworks(arrayOf(activeNetwork))
+        if (activePhysicalNetwork != null) {
+            builder.setUnderlyingNetworks(arrayOf(activePhysicalNetwork!!))
+        } else {
+            val activeNetwork = connectivityManager?.activeNetwork
+            if (activeNetwork != null) {
+                builder.setUnderlyingNetworks(arrayOf(activeNetwork))
+            }
         }
 
         // Allow apps to explicitly bypass the VPN to fix Google SMS / RCS
@@ -345,6 +369,10 @@ class MyVpnService : VpnService() {
             val caps = connectivityManager?.getNetworkCapabilities(network)
             if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
                 Log.w(TAG, "Ignoring network $network because it lacks INTERNET capability")
+                return
+            }
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
+                Log.d(TAG, "Ignoring VPN network $network")
                 return
             }
 

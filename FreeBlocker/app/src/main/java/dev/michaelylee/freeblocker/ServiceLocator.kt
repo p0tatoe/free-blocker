@@ -11,6 +11,7 @@ object ServiceLocator {
     lateinit var dnsFilter: DnsFilter
         private set
 
+    @android.annotation.SuppressLint("StaticFieldLeak")
     lateinit var blocklistRepository: BlocklistRepository
         private set
 

@@ -69,34 +69,48 @@ fn get_min_ttl(payload: &[u8]) -> Option<u32> {
 #[derive(uniffi::Object)]
 pub struct DnsProxy {
     tun_fd: i32,
-    quic_fd: i32,
-    upstream_host: String,
+    quic_fd_v4: Option<i32>,
+    quic_fd_v6: Option<i32>,
+    upstream_v4: Option<String>,
+    upstream_v6: Option<String>,
     sni_hostname: String,
     blocklist: Arc<RwLock<Trie<Vec<u8>, ()>>>,
     cancel_token: CancellationToken,
-    doq_endpoint: Arc<DoqEndpoint>,
+    doq_endpoint_v4: Option<Arc<DoqEndpoint>>,
+    doq_endpoint_v6: Option<Arc<DoqEndpoint>>,
 }
 
 #[uniffi::export]
 impl DnsProxy {
     #[uniffi::constructor]
-    pub fn new(tun_fd: i32, upstream_host: String, sni_hostname: String) -> Arc<Self> {
+    pub fn new(tun_fd: i32, upstream_v4: Option<String>, upstream_v6: Option<String>, sni_hostname: String) -> Arc<Self> {
         let _guard = get_runtime().enter();
-        let doq_endpoint = Arc::new(DoqEndpoint::new().expect("Failed to create DoQ endpoint"));
-        let quic_fd = doq_endpoint.get_socket_fd();
+        let doq_endpoint_v4 = upstream_v4.as_ref().map(|_| Arc::new(DoqEndpoint::new_v4().expect("Failed to create DoQ IPv4 endpoint")));
+        let quic_fd_v4 = doq_endpoint_v4.as_ref().map(|e| e.get_socket_fd());
+        
+        let doq_endpoint_v6 = upstream_v6.as_ref().map(|_| Arc::new(DoqEndpoint::new_v6().expect("Failed to create DoQ IPv6 endpoint")));
+        let quic_fd_v6 = doq_endpoint_v6.as_ref().map(|e| e.get_socket_fd());
+
         Arc::new(Self {
             tun_fd,
-            quic_fd,
-            upstream_host,
+            quic_fd_v4,
+            quic_fd_v6,
+            upstream_v4,
+            upstream_v6,
             sni_hostname,
             blocklist: Arc::new(RwLock::new(Trie::new())),
             cancel_token: CancellationToken::new(),
-            doq_endpoint,
+            doq_endpoint_v4,
+            doq_endpoint_v6,
         })
     }
 
-    pub fn get_quic_fd(&self) -> i32 {
-        self.quic_fd
+    pub fn get_quic_fd_v4(&self) -> Option<i32> {
+        self.quic_fd_v4
+    }
+
+    pub fn get_quic_fd_v6(&self) -> Option<i32> {
+        self.quic_fd_v6
     }
 
     pub fn stop(&self) {
@@ -105,17 +119,19 @@ impl DnsProxy {
 
     pub fn start(&self) {
         let tun_fd = self.tun_fd;
-        let upstream = self.upstream_host.clone();
+        let upstream_v4 = self.upstream_v4.clone();
+        let upstream_v6 = self.upstream_v6.clone();
         let sni_hostname = self.sni_hostname.clone();
         let blocklist = self.blocklist.clone();
         let cancel_token = self.cancel_token.child_token();
-        let doq_endpoint = self.doq_endpoint.clone();
+        let doq_endpoint_v4 = self.doq_endpoint_v4.clone();
+        let doq_endpoint_v6 = self.doq_endpoint_v6.clone();
 
         get_runtime().spawn(async move {
-            run_proxy(tun_fd, upstream, sni_hostname, blocklist, cancel_token, doq_endpoint).await;
+            run_proxy(tun_fd, upstream_v4, upstream_v6, sni_hostname, blocklist, cancel_token, doq_endpoint_v4, doq_endpoint_v6).await;
         });
     }
-
+    
     pub fn update_blocklist(&self, domains: Vec<String>) {
         let mut trie = Trie::new();
         for domain in domains {
@@ -156,11 +172,13 @@ fn log_trace(_msg: &str) {
 
 async fn run_proxy(
     tun_fd: i32,
-    upstream: String,
+    upstream_v4: Option<String>,
+    upstream_v6: Option<String>,
     sni_hostname: String,
     blocklist: Arc<RwLock<Trie<Vec<u8>, ()>>>,
     cancel_token: CancellationToken,
-    doq_endpoint: Arc<DoqEndpoint>,
+    doq_endpoint_v4: Option<Arc<DoqEndpoint>>,
+    doq_endpoint_v6: Option<Arc<DoqEndpoint>>,
 ) {
     log_trace("run_proxy started");
     let mut buf = vec![0u8; 65536];
@@ -268,15 +286,16 @@ async fn run_proxy(
                                         continue;
                                     }
                                     drop(cache_lock);
-                                    
-                                    // Forward via DoQ
+                                                                       // Forward via DoQ
                                     let doq_conn = doq_conn.clone();
-                                    let doq_endpoint = doq_endpoint.clone();
+                                    let doq_endpoint_v4 = doq_endpoint_v4.clone();
+                                    let doq_endpoint_v6 = doq_endpoint_v6.clone();
                                     let payload_vec = payload.to_vec();
                                     let req_ip = pkt.to_vec();
                                     let cache_key = full_cache_key;
                                     let cache_clone = cache.clone();
-                                    let upstream_clone = upstream.clone();
+                                    let upstream_v4_clone = upstream_v4.clone();
+                                    let upstream_v6_clone = upstream_v6.clone();
                                     let tx_clone = tx.clone();
                                     let sni_clone = sni_hostname.clone();
                                     let task_token = cancel_token.clone();
@@ -303,9 +322,53 @@ async fn run_proxy(
                                                         } else {
                                                             lock.1 = now;
                                                             drop(lock); // Drop lock while connecting to prevent blocking other queries!
-                                                            log_trace(&format!("Attempting to connect DoQ to {} with SNI {}", upstream_clone, sni_clone));
+                                                            log_trace(&format!("Attempting to connect DoQ (Happy Eyeballs) with SNI {}", sni_clone));
                                                             
-                                                            match tokio::time::timeout(std::time::Duration::from_secs(10), doq_endpoint.connect(&upstream_clone, &sni_clone)).await {
+                                                            let fut_v6 = async {
+                                                                if let (Some(ep), Some(ip)) = (&doq_endpoint_v6, &upstream_v6_clone) {
+                                                                    ep.connect(ip, &sni_clone).await
+                                                                } else {
+                                                                    Err("No IPv6 upstream".into())
+                                                                }
+                                                            };
+                                                            let fut_v4 = async {
+                                                                if let (Some(ep), Some(ip)) = (&doq_endpoint_v4, &upstream_v4_clone) {
+                                                                    ep.connect(ip, &sni_clone).await
+                                                                } else {
+                                                                    Err("No IPv4 upstream".into())
+                                                                }
+                                                            };
+
+                                                            let connect_future = async {
+                                                                if upstream_v6_clone.is_some() && upstream_v4_clone.is_some() {
+                                                                    let mut fut6 = std::pin::pin!(fut_v6);
+                                                                    let mut fut4 = std::pin::pin!(fut_v4);
+                                                                    tokio::select! {
+                                                                        res = &mut fut6 => {
+                                                                            if res.is_ok() { return res; }
+                                                                            fut4.await
+                                                                        }
+                                                                        _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                                                                            tokio::select! {
+                                                                                res = &mut fut6 => {
+                                                                                    if res.is_ok() { return res; }
+                                                                                    fut4.await
+                                                                                }
+                                                                                res = &mut fut4 => {
+                                                                                    if res.is_ok() { return res; }
+                                                                                    fut6.await
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                } else if upstream_v6_clone.is_some() {
+                                                                    fut_v6.await
+                                                                } else {
+                                                                    fut_v4.await
+                                                                }
+                                                            };
+                                                            
+                                                            match tokio::time::timeout(std::time::Duration::from_secs(10), connect_future).await {
                                                                 Ok(Ok(c)) => {
                                                                     log_trace("DoQ connection established");
                                                                     let arc = Arc::new(c);
@@ -317,13 +380,13 @@ async fn run_proxy(
                                                                 Ok(Err(e)) => {
                                                                     log_trace(&format!("DoQ Connect Error: {}", e));
                                                                     let mut lock = doq_conn.lock().await;
-                                                                    lock.1 = std::time::Instant::now() - std::time::Duration::from_secs(10); // Reset debounce
+                                                                    lock.1 = std::time::Instant::now() - std::time::Duration::from_secs(10);
                                                                     None
                                                                 }
                                                                 Err(_) => {
                                                                     log_trace("DoQ Connect Timeout");
                                                                     let mut lock = doq_conn.lock().await;
-                                                                    lock.1 = std::time::Instant::now() - std::time::Duration::from_secs(10); // Reset debounce
+                                                                    lock.1 = std::time::Instant::now() - std::time::Duration::from_secs(10);
                                                                     None
                                                                 }
                                                             }

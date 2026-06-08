@@ -636,7 +636,9 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
-    external fun uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd(
+    external fun uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd_v4(
+    ): Short
+    external fun uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd_v6(
     ): Short
     external fun uniffi_free_block_rust_checksum_method_dnsproxy_start(
     ): Short
@@ -668,10 +670,12 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_free_block_rust_fn_free_dnsproxy(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_free_block_rust_fn_constructor_dnsproxy_new(`tunFd`: Int,`upstreamHost`: RustBuffer.ByValue,`sniHostname`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_free_block_rust_fn_constructor_dnsproxy_new(`tunFd`: Int,`upstreamV4`: RustBuffer.ByValue,`upstreamV6`: RustBuffer.ByValue,`sniHostname`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Int
+    external fun uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd_v4(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd_v6(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_free_block_rust_fn_method_dnsproxy_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_free_block_rust_fn_method_dnsproxy_stop(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -797,7 +801,10 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd() != 1705.toShort()) {
+    if (lib.uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd_v4() != 23223.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_free_block_rust_checksum_method_dnsproxy_get_quic_fd_v6() != 47865.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_free_block_rust_checksum_method_dnsproxy_start() != 15164.toShort()) {
@@ -809,7 +816,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_free_block_rust_checksum_method_dnsproxy_update_blocklist() != 4148.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_free_block_rust_checksum_constructor_dnsproxy_new() != 54139.toShort()) {
+    if (lib.uniffi_free_block_rust_checksum_constructor_dnsproxy_new() != 4477.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1147,7 +1154,9 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 public interface DnsProxyInterface {
     
-    fun `getQuicFd`(): kotlin.Int
+    fun `getQuicFdV4`(): kotlin.Int?
+    
+    fun `getQuicFdV6`(): kotlin.Int?
     
     fun `start`()
     
@@ -1182,12 +1191,12 @@ open class DnsProxy: Disposable, AutoCloseable, DnsProxyInterface
         this.handle = 0
         this.cleanable = null
     }
-    constructor(`tunFd`: kotlin.Int, `upstreamHost`: kotlin.String, `sniHostname`: kotlin.String) :
+    constructor(`tunFd`: kotlin.Int, `upstreamV4`: kotlin.String?, `upstreamV6`: kotlin.String?, `sniHostname`: kotlin.String) :
         this(UniffiWithHandle, 
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_free_block_rust_fn_constructor_dnsproxy_new(
     
-        FfiConverterInt.lower(`tunFd`),FfiConverterString.lower(`upstreamHost`),FfiConverterString.lower(`sniHostname`),_status)
+        FfiConverterInt.lower(`tunFd`),FfiConverterOptionalString.lower(`upstreamV4`),FfiConverterOptionalString.lower(`upstreamV6`),FfiConverterString.lower(`sniHostname`),_status)
 }
     )
 
@@ -1262,11 +1271,24 @@ open class DnsProxy: Disposable, AutoCloseable, DnsProxyInterface
         }
     }
 
-    override fun `getQuicFd`(): kotlin.Int {
-            return FfiConverterInt.lift(
+    override fun `getQuicFdV4`(): kotlin.Int? {
+            return FfiConverterOptionalInt.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd(
+    UniffiLib.uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd_v4(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `getQuicFdV6`(): kotlin.Int? {
+            return FfiConverterOptionalInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_free_block_rust_fn_method_dnsproxy_get_quic_fd_v6(
         it,
         _status)
 }
@@ -1346,6 +1368,70 @@ public object FfiConverterTypeDnsProxy: FfiConverter<DnsProxy, Long> {
 
     override fun write(value: DnsProxy, buf: ByteBuffer) {
         buf.putLong(lower(value))
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalInt: FfiConverterRustBuffer<kotlin.Int?> {
+    override fun read(buf: ByteBuffer): kotlin.Int? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Int?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Int?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
+    override fun read(buf: ByteBuffer): kotlin.String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.String?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
+        }
     }
 }
 

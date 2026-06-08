@@ -12,7 +12,15 @@ pub struct DoqEndpoint {
 }
 
 impl DoqEndpoint {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new_v4() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_bind("0.0.0.0:0")
+    }
+
+    pub fn new_v6() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_bind("[::]:0")
+    }
+
+    fn new_with_bind(bind_addr: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut roots = rustls::RootCertStore::empty();
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let mut crypto = rustls::ClientConfig::builder()
@@ -24,8 +32,7 @@ impl DoqEndpoint {
             quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
         ));
 
-        // Bind to IPv4 specifically to avoid IPv4-mapped IPv6 routing issues with SO_MARK
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        let socket = std::net::UdpSocket::bind(bind_addr)?;
         socket.set_nonblocking(true)?;
         let socket_fd = socket.as_raw_fd();
         
