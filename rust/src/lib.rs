@@ -183,7 +183,7 @@ async fn run_proxy(
     log_trace("run_proxy started");
     let mut buf = vec![0u8; 65536];
     let mut async_fd_opt = None;
-    for _ in 0..50 {
+    for _ in 0..500 {
         match tokio::io::unix::AsyncFd::new(tun_fd) {
             Ok(fd) => {
                 async_fd_opt = Some(fd);
@@ -202,7 +202,7 @@ async fn run_proxy(
     let async_fd = match async_fd_opt {
         Some(fd) => fd,
         None => {
-            log_trace("AsyncFd::new failed with EEXIST after 500ms");
+            log_trace("AsyncFd::new failed with EEXIST after 5s");
             return;
         }
     };

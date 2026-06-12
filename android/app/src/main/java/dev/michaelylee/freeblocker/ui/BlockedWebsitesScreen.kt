@@ -144,7 +144,7 @@ fun BlockedWebsitesScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp, bottom = 2.dp)
+                        .padding(top = 4.dp)
                 ) {
                     androidx.compose.foundation.Image(
                         painter = androidx.compose.ui.res.painterResource(id = dev.michaelylee.freeblocker.R.drawable.ic_launcher_foreground),

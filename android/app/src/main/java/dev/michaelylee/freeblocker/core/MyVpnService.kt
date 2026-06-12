@@ -259,11 +259,12 @@ class MyVpnService : VpnService() {
 
     private val rebuildMutex = Mutex()
     private var rebuildJob: Job? = null
+    private var networkReconnectJob: Job? = null
 
     private fun debounceRebuild() {
         rebuildJob?.cancel()
         rebuildJob = serviceScope.launch {
-            kotlinx.coroutines.delay(500)
+            kotlinx.coroutines.delay(200)
             rebuildTunInterface()
         }
     }
@@ -276,6 +277,9 @@ class MyVpnService : VpnService() {
      * fresh [DnsProxy] is started, which also forces Android to flush its DNS
      * resolver cache so all apps immediately re-query through our filter
      * instead of using stale cached results.
+     *
+     * Used for blocking toggle and DNS cache flush — NOT for network changes,
+     * which use [reconnectUpstream] instead to avoid tearing down the VPN.
      */
     private suspend fun rebuildTunInterface() {
         rebuildMutex.withLock {
@@ -297,6 +301,48 @@ class MyVpnService : VpnService() {
 
             startTunLoop()
             Log.i(TAG, "TUN rebuilt — DNS cache flushed")
+        }
+    }
+
+    /**
+     * Recycles the upstream [DnsProxy] without tearing down the TUN interface.
+     *
+     * When the physical network changes (WiFi ↔ Mobile), the old QUIC sockets
+     * are bound to the previous network's routing and can no longer reach the
+     * upstream DNS server.  This method:
+     *   1. Stops the old [DnsProxy] (kills stale QUIC connections).
+     *   2. Updates the VPN's underlying network so Android reports correct
+     *      connectivity status for bypassed apps (GMS, etc.).
+     *   3. Starts a fresh [DnsProxy] with new QUIC sockets on the same TUN fd.
+     *
+     * Crucially, the TUN interface stays alive throughout, so Android never
+     * deregisters the VPN as the default network.  This prevents the
+     * connectivity disruption that caused bypassed apps like Google Messages
+     * to lose their RCS / Play Services connections.
+     */
+    private suspend fun reconnectUpstream() {
+        rebuildMutex.withLock {
+            if (vpnInterface == null) return
+
+            Log.i(TAG, "Reconnecting upstream on new network…")
+
+            // 1. Stop old proxy (kills stale QUIC connections bound to old network)
+            dnsProxy?.stop()
+            dnsProxy = null
+
+            // 2. Give the old proxy's Tokio task time to exit and release the
+            //    AsyncFd on the TUN fd.  The task may be waiting on a QUIC query
+            //    timeout (up to 3 s), but the cancel token should interrupt the
+            //    select! loop within a few hundred ms.
+            kotlinx.coroutines.delay(1000)
+
+            // 3. Update underlying network so the VPN inherits the new network's
+            //    connectivity status — bypassed apps see uninterrupted internet.
+            activePhysicalNetwork?.let { setUnderlyingNetworks(arrayOf(it)) }
+
+            // 4. Start a fresh proxy on the same TUN fd with new QUIC sockets
+            startTunLoop()
+            Log.i(TAG, "Upstream reconnected — new QUIC sockets on current network")
         }
     }
 
@@ -337,25 +383,26 @@ class MyVpnService : VpnService() {
         // Allow apps to explicitly bypass the VPN to fix Google SMS / RCS
         builder.allowBypass()
 
-        // Only include target apps in the VPN tunnel
-        val filteredApps = userPreferences.getFilteredApps()
-        if (filteredApps.isEmpty()) {
-            // If no apps are selected, Android routes all apps by default.
-            // To prevent this and truly route nothing, we add our own app as the only allowed app.
+        // Exclude bypassed apps from the VPN tunnel
+        val bypassedApps = userPreferences.getBypassedApps().toMutableSet()
+        
+        // Critical system packages that must bypass the VPN to maintain connectivity signalling
+        val systemBypasses = listOf(
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.google.android.networkstack",
+            "com.google.android.captiveportallogin",
+            "com.google.android.projection.gearhead", // Android Auto
+            packageName // FreeBlocker itself
+        )
+        bypassedApps.addAll(systemBypasses)
+
+        for (pkg in bypassedApps) {
             try {
-                builder.addAllowedApplication(packageName)
-                Log.d(TAG, "No apps targeted. Routing only FreeBlocker to keep VPN idle.")
+                builder.addDisallowedApplication(pkg)
+                Log.d(TAG, "Excluded app from VPN: $pkg")
             } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
-                Log.w(TAG, "Could not add self to allowed applications")
-            }
-        } else {
-            for (pkg in filteredApps) {
-                try {
-                    builder.addAllowedApplication(pkg)
-                    Log.d(TAG, "Included app in VPN: $pkg")
-                } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
-                    Log.w(TAG, "Skipping unknown package: $pkg")
-                }
+                Log.w(TAG, "Skipping unknown package: $pkg")
             }
         }
 
@@ -366,54 +413,56 @@ class MyVpnService : VpnService() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            val caps = connectivityManager?.getNetworkCapabilities(network)
-            if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                Log.w(TAG, "Ignoring network $network because it lacks INTERNET capability")
-                return
-            }
-            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
-                Log.d(TAG, "Ignoring VPN network $network")
-                return
-            }
+            Log.d(TAG, "Physical network available: $network (waiting for validation)")
+        }
 
-            if (network == activePhysicalNetwork) {
-                Log.d(TAG, "Ignoring duplicate onAvailable for network $network")
-                return
-            }
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            // NOT_VPN is already filtered by the NetworkRequest — no need to check here.
+            // Only act once the network passes Android's connectivity validation.
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+            if (network == activePhysicalNetwork) return
 
-            Log.i(TAG, "Network change detected: $network — draining upstream connection pool")
+            Log.i(TAG, "Validated physical network: $network — reconnecting upstream")
             activePhysicalNetwork = network
-            setUnderlyingNetworks(arrayOf(network))
-            
-            // Rebuild the TUN interface to tear down the old proxy and start a fresh one,
-            // which creates a new UDP socket that properly inherits the new network routing.
-            // This also flushes the stale DNS cache which is vital when moving between networks.
-            debounceRebuild()
+
+            // Recycle the DnsProxy without tearing down the TUN.
+            // This keeps the VPN interface alive so Android never reports a
+            // connectivity gap to bypassed apps (GMS, Google Messages, etc.).
+            networkReconnectJob?.cancel()
+            networkReconnectJob = serviceScope.launch { reconnectUpstream() }
         }
 
         override fun onLost(network: Network) {
+            Log.w(TAG, "Physical network lost: $network")
             if (network == activePhysicalNetwork) {
-                Log.w(TAG, "Active physical network lost: $network")
                 activePhysicalNetwork = null
+                // Try to reconnect on any other available network.
+                // The ConnectivityManager will deliver onCapabilitiesChanged
+                // for any remaining validated network, which will trigger reconnect.
             }
         }
     }
 
     private var connectivityManager: ConnectivityManager? = null
 
+    /**
+     * Registers a callback that explicitly tracks physical (non-VPN) networks.
+     *
+     * We use [ConnectivityManager.registerNetworkCallback] with a request that
+     * requires [NetworkCapabilities.NET_CAPABILITY_NOT_VPN] instead of
+     * [ConnectivityManager.registerDefaultNetworkCallback] because the latter
+     * reports the VPN itself as the default network when the VPN is active.
+     * The NOT_VPN check in the callback would then filter out every event,
+     * meaning we'd never detect physical network changes.
+     */
     private fun registerNetworkCallback() {
         connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // Tracking the default network perfectly aligns with protect(fd) routing
-            connectivityManager?.registerDefaultNetworkCallback(networkCallback)
-        } else {
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-                .build()
-            connectivityManager?.registerNetworkCallback(request, networkCallback)
-        }
-        Log.d(TAG, "Network callback registered")
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        connectivityManager?.registerNetworkCallback(request, networkCallback)
+        Log.d(TAG, "Network callback registered (tracking physical networks)")
     }
 
     private fun unregisterNetworkCallback() {

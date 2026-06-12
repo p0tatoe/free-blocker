@@ -84,7 +84,7 @@ fun AppsScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val filteredApps by viewModel.filteredApps.collectAsState()
+    val bypassedApps by viewModel.bypassedApps.collectAsState()
 
     // Resolve installed apps off the main thread
     var installedApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
@@ -107,19 +107,15 @@ fun AppsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
 
-    val displayedApps = remember(installedApps, searchQuery, filteredApps) {
+    val displayedApps = remember(installedApps, searchQuery, bypassedApps) {
         installedApps
             .filter { app ->
                 if (searchQuery.isBlank()) return@filter true
                 app.label.contains(searchQuery, ignoreCase = true) ||
                     app.packageName.contains(searchQuery, ignoreCase = true)
             }
-            .sortedWith(compareByDescending<AppInfo> { it.packageName in filteredApps }
+            .sortedWith(compareByDescending<AppInfo> { it.packageName in bypassedApps }
                 .thenBy { it.label.lowercase() })
-    }
-
-    val hasUnsupportedBrowsers = remember(installedApps) {
-        installedApps.any { it.packageName == "com.brave.browser" || it.packageName == "org.mozilla.firefox" }
     }
 
     var showInfoDialog by remember { mutableStateOf(false) }
@@ -133,12 +129,12 @@ fun AppsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Targets Info",
+                        text = "Bypass List Info",
                         style = MaterialTheme.typography.titleLarge
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Selected target apps will have their traffic routed through the VPN to be filtered. Apps that are NOT selected will bypass the VPN entirely.",
+                        text = "Selected apps will bypass the VPN entirely and use your normal connection. All other apps will have their traffic routed through the VPN to be filtered.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -168,11 +164,11 @@ fun AppsScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text  = "Targets",
+                text  = "Bypass List",
                 style = MaterialTheme.typography.headlineSmall,
             )
             Spacer(Modifier.weight(1f))
@@ -184,7 +180,7 @@ fun AppsScreen(
                     imageVector = androidx.compose.material.icons.Icons.Outlined.Info,
                     contentDescription = "Info",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(48.dp)
                 )
             }
         }
@@ -195,39 +191,12 @@ fun AppsScreen(
             onValueChange = { searchQuery = it },
             modifier      = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             placeholder   = { Text("Search apps…") },
             leadingIcon   = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine    = true,
             shape         = RoundedCornerShape(12.dp),
         )
-
-        if (hasUnsupportedBrowsers) {
-            androidx.compose.material3.Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = androidx.compose.material3.CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Row(modifier = Modifier.padding(16.dp)) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Outlined.Info,
-                        contentDescription = "Warning",
-                        tint = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "Brave and Firefox are not supported as they use their own secure DNS which bypasses the local VPN.",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        }
-
-
 
         HorizontalDivider()
 
@@ -254,13 +223,13 @@ fun AppsScreen(
                 ) { app ->
                     AppRow(
                         app           = app,
-                        isFiltered    = app.packageName in filteredApps,
+                        isBypassed    = app.packageName in bypassedApps,
                         onToggle      = { checked ->
-                            viewModel.setAppFiltered(app.packageName, checked)
+                            viewModel.setAppBypassed(app.packageName, checked)
                             coroutineScope.launch {
                                 snackbarHostState.currentSnackbarData?.dismiss()
                                 snackbarHostState.showSnackbar(
-                                    message = if (checked) "${app.label} added to targets" else "${app.label} removed from targets",
+                                    message = if (checked) "${app.label} added to bypass list" else "${app.label} removed from bypass list",
                                     duration = androidx.compose.material3.SnackbarDuration.Short
                                 )
                             }
@@ -276,13 +245,13 @@ fun AppsScreen(
 @Composable
 private fun AppRow(
     app: AppInfo,
-    isFiltered: Boolean,
+    isBypassed: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
     Row(
         modifier            = Modifier
             .fillMaxWidth()
-            .clickable { onToggle(!isFiltered) }
+            .clickable { onToggle(!isBypassed) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment   = Alignment.CenterVertically,
     ) {
@@ -314,7 +283,7 @@ private fun AppRow(
         Spacer(Modifier.width(8.dp))
 
         Checkbox(
-            checked    = isFiltered,
+            checked    = isBypassed,
             onCheckedChange = null,
         )
     }

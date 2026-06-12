@@ -102,7 +102,7 @@ fun BlocklistsScreen(
                         imageVector = Icons.Outlined.Info,
                         contentDescription = "Info",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     )
                 }
             }

@@ -351,32 +351,31 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // -------------------------------------------------------------------------
-    // Target apps (filtered by VPN)
+    // Bypassed apps (exceptions)
     // -------------------------------------------------------------------------
 
     /**
-     * Package names of apps whose traffic is routed through the VPN.
-     * Backed by [VpnService.Builder.addAllowedApplication] at tunnel
+     * Package names of apps whose traffic bypasses the VPN entirely.
+     * Backed by [VpnService.Builder.addDisallowedApplication] at tunnel
      * creation time.
      */
-    val filteredApps: StateFlow<Set<String>> = prefs.filteredAppsFlow
+    val bypassedApps: StateFlow<Set<String>> = prefs.bypassedAppsFlow
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
-            initialValue = UserPreferences.DEFAULT_FILTERED_APPS,
+            initialValue = UserPreferences.DEFAULT_BYPASSED_APPS,
         )
 
     /**
-     * Toggles whether [packageName] is filtered by the VPN.
-     * Persists the change to DataStore and flags a pending restart if the
-     * VPN is currently running (the tunnel must be rebuilt).
+     * Toggles whether [packageName] bypasses the VPN.
+     * Persists the change to DataStore and flushes DNS cache so connections rebuild.
      */
-    fun setAppFiltered(packageName: String, filtered: Boolean) {
+    fun setAppBypassed(packageName: String, bypassed: Boolean) {
         viewModelScope.launch {
-            if (filtered) {
-                prefs.addFilteredApp(packageName)
+            if (bypassed) {
+                prefs.addBypassedApp(packageName)
             } else {
-                prefs.removeFilteredApp(packageName)
+                prefs.removeBypassedApp(packageName)
             }
             flushDnsCache()
         }
