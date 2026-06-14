@@ -24,8 +24,11 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -43,6 +46,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +70,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun BlockedWebsitesScreen(
     viewModel: VpnViewModel,
+    isDarkTheme: Boolean,
+    onThemeToggle: () -> Unit,
     onCloseApp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -144,19 +150,11 @@ fun BlockedWebsitesScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp)
+                        .padding(start = 8.dp, end = 8.dp, top = 16.dp, bottom = 8.dp)
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = androidx.compose.ui.res.painterResource(id = dev.michaelylee.freeblocker.R.drawable.ic_launcher_foreground),
-                        contentDescription = "App Icon",
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "Free Block",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontFamily = dev.michaelylee.freeblocker.ui.theme.RighteousFamily
-                        )
+                        text = "Free Blocker",
+                        style = MaterialTheme.typography.displayLarge
                     )
                     Spacer(Modifier.weight(1f))
                     androidx.compose.material3.IconButton(
@@ -167,8 +165,76 @@ fun BlockedWebsitesScreen(
                             imageVector = Icons.Outlined.Info,
                             contentDescription = "Info",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(40.dp)
                         )
+                    }
+                }
+            }
+
+            // ── Settings islands ──────────────────────────────────────────────
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Theme Island
+                    Card(
+                        modifier = Modifier.weight(1f).clickable { onThemeToggle() },
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Start
+                        ) {
+                            androidx.compose.material3.FilledIconButton(
+                                onClick = onThemeToggle,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = "Toggle theme",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (isDarkTheme) "Light mode" else "Dark mode",
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+
+                    // List Visibility Island
+                    Card(
+                        modifier = Modifier.weight(1f).clickable { isListVisible = !isListVisible },
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Start
+                        ) {
+                            androidx.compose.material3.FilledIconButton(
+                                onClick = { isListVisible = !isListVisible },
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isListVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (isListVisible) "Hide list" else "Show list",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (isListVisible) "Collapse list" else "Display list",
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
                     }
                 }
             }
@@ -192,33 +258,6 @@ fun BlockedWebsitesScreen(
                         .padding(top = 12.dp, bottom = 4.dp)
                         .padding(horizontal = 8.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text  = "Blocked Websites",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        androidx.compose.material3.FilledIconButton(
-                            onClick = { isListVisible = !isListVisible },
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isListVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (isListVisible) "Hide list" else "Show list",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text  = "${manualBlocked.size} websites blocked manually",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     val blocklistText = if (customUrls.isNotEmpty()) {
                         when (blocklistState) {
                             is BlocklistState.Loading -> "updating blocklists…"
@@ -228,11 +267,20 @@ fun BlockedWebsitesScreen(
                     } else {
                         ""
                     }
-                    if (blocklistText.isNotEmpty()) {
+                    
+                    val headerText = if (blocklistText.isNotEmpty()) {
+                        "Blocked Websites: ${manualBlocked.size} ($blocklistText)"
+                    } else {
+                        "Blocked Websites: ${manualBlocked.size}"
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text  = blocklistText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text  = headerText,
+                            style = MaterialTheme.typography.displayMedium,
                         )
                     }
                 }
@@ -274,10 +322,7 @@ private fun VpnStatusCard(
     onStartOnBootToggle : (Boolean) -> Unit,
     onCloseApp          : () -> Unit,
 ) {
-    val containerColor = if (isBlockingEnabled)
-        MaterialTheme.colorScheme.primaryContainer
-    else
-        MaterialTheme.colorScheme.secondaryContainer
+    val containerColor = MaterialTheme.colorScheme.surfaceVariant
 
     Card(
         colors   = CardDefaults.cardColors(containerColor = containerColor),
@@ -320,7 +365,7 @@ private fun VpnStatusCard(
                     onCheckedChange = onStartOnBootToggle,
                 )
             }
-
+            
             Spacer(Modifier.height(2.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
 
@@ -334,8 +379,8 @@ private fun VpnStatusCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "VPN Status:",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Status:",
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                     Spacer(Modifier.width(8.dp))
                     val dotColor = if (isVpnEnabled) Color(0xFF4CAF50) else Color(0xFFF44336)
@@ -345,12 +390,14 @@ private fun VpnStatusCard(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = if (isVpnEnabled) "ON" else "OFF",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = dotColor,
                     )
                 }
-                Button(onClick = onCloseApp) {
-                    Text("Stop VPN & Close")
+                Button(
+                    onClick = onCloseApp,
+                ) {
+                    Text("Stop & Close")
                 }
             }
 

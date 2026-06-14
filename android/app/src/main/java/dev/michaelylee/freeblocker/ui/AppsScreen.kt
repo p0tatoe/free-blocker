@@ -164,12 +164,12 @@ fun AppsScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text  = "Bypass List",
-                style = MaterialTheme.typography.headlineSmall,
+                text  = "Whitelisted Apps",
+                style = MaterialTheme.typography.displayLarge,
             )
             Spacer(Modifier.weight(1f))
             androidx.compose.material3.IconButton(
@@ -177,10 +177,10 @@ fun AppsScreen(
                 modifier = Modifier.size(56.dp)
             ) {
                 Icon(
-                    imageVector = androidx.compose.material.icons.Icons.Outlined.Info,
+                    imageVector = Icons.Outlined.Info,
                     contentDescription = "Info",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(40.dp)
                 )
             }
         }

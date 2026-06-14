@@ -83,15 +83,15 @@ fun BlocklistsScreen(
 
         // ── Status + refresh ──────────────────────────────────────────────────
         item {
-            Spacer(Modifier.height(16.dp))
-            
             Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "Blocklist Sources",
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.displayLarge,
                 )
                 Spacer(Modifier.weight(1f))
                 androidx.compose.material3.IconButton(
@@ -102,7 +102,7 @@ fun BlocklistsScreen(
                         imageVector = Icons.Outlined.Info,
                         contentDescription = "Info",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                 }
             }
@@ -142,11 +142,6 @@ fun BlocklistsScreen(
         // ── Custom sources ────────────────────────────────────────────────────
         item {
             Spacer(Modifier.height(16.dp))
-            Text(
-                text     = "Custom Sources",
-                style    = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
             DomainInputRow(

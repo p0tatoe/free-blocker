@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,7 +13,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -27,7 +26,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import dev.michaelylee.freeblocker.core.MyVpnService
 import dev.michaelylee.freeblocker.ui.AppsScreen
 import dev.michaelylee.freeblocker.ui.BlockedWebsitesScreen
 import dev.michaelylee.freeblocker.ui.BlocklistsScreen
@@ -76,8 +74,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var selectedTab by remember { mutableStateOf(0) }
+            var isDarkTheme by remember { mutableStateOf(true) }
 
-            FreeBlockerTheme(darkTheme = true) {
+            FreeBlockerTheme(darkTheme = isDarkTheme) {
                 Scaffold(
                     bottomBar = {
                         NavigationBar {
@@ -96,8 +95,8 @@ class MainActivity : ComponentActivity() {
                             NavigationBarItem(
                                 selected = selectedTab == 2,
                                 onClick  = { selectedTab = 2 },
-                                icon     = { Icon(Icons.Default.Radar, contentDescription = "Targets") },
-                                label    = { Text("Targets") },
+                                icon     = { Icon(Icons.Default.Smartphone, contentDescription = "") },
+                                label    = { Text("Whitelist") },
                             )
                         }
                     }
@@ -105,6 +104,8 @@ class MainActivity : ComponentActivity() {
                     when (selectedTab) {
                         0 -> BlockedWebsitesScreen(
                             viewModel  = viewModel,
+                            isDarkTheme = isDarkTheme,
+                            onThemeToggle = { isDarkTheme = !isDarkTheme },
                             onCloseApp = ::stopVpnAndClose,
                             modifier   = Modifier.padding(padding),
                         )
