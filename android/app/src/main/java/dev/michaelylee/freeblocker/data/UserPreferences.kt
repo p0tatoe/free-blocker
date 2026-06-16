@@ -26,6 +26,7 @@ class UserPreferences(private val context: Context) {
         val MANUAL_BLOCKED         = stringSetPreferencesKey("manual_blocked_domains")
         val WHITELISTED            = stringSetPreferencesKey("whitelisted_domains")
         val CUSTOM_SOURCE_URLS     = stringSetPreferencesKey("custom_source_urls")
+        val THEME_MODE             = stringPreferencesKey("theme_mode")
 
         /**
          * Stores the active upstream as a single encoded string.
@@ -37,6 +38,7 @@ class UserPreferences(private val context: Context) {
         val IS_START_ON_BOOT       = booleanPreferencesKey("is_start_on_boot")
         val BYPASSED_APPS          = stringSetPreferencesKey("bypassed_app_packages")
         val PAUSED_DOMAINS         = stringSetPreferencesKey("paused_domains")
+        val HAS_SEEN_WELCOME       = booleanPreferencesKey("has_seen_welcome")
     }
 
     companion object {
@@ -164,6 +166,22 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setStartOnBoot(enabled: Boolean) {
         context.dataStore.edit { it[Keys.IS_START_ON_BOOT] = enabled }
+    }
+
+    val themeModeFlow: Flow<String> = context.dataStore.data
+        .catchIo(emptyPreferences())
+        .map { it[Keys.THEME_MODE] ?: "Dark" }
+
+    suspend fun setThemeMode(mode: String) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode }
+    }
+
+    val hasSeenWelcomeFlow: Flow<Boolean> = context.dataStore.data
+        .catchIo(emptyPreferences())
+        .map { it[Keys.HAS_SEEN_WELCOME] ?: false }
+
+    suspend fun setHasSeenWelcome(seen: Boolean) {
+        context.dataStore.edit { it[Keys.HAS_SEEN_WELCOME] = seen }
     }
 
     // ── Bypassed apps (exceptions) ─────────────────────────────────────────

@@ -10,6 +10,7 @@ import dev.michaelylee.freeblocker.core.MyVpnService
 import dev.michaelylee.freeblocker.data.BlocklistRepository
 import dev.michaelylee.freeblocker.data.BlocklistState
 import dev.michaelylee.freeblocker.data.UserPreferences
+import dev.michaelylee.freeblocker.ui.theme.ThemeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -146,6 +148,35 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setStartOnBoot(enabled: Boolean) {
         viewModelScope.launch { prefs.setStartOnBoot(enabled) }
+    }
+
+    val themeMode: StateFlow<ThemeMode> = prefs.themeModeFlow
+        .map { 
+            try {
+                ThemeMode.valueOf(it)
+            } catch (e: IllegalArgumentException) {
+                ThemeMode.Dark
+            }
+        }
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ThemeMode.Dark,
+        )
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { prefs.setThemeMode(mode.name) }
+    }
+
+    val hasSeenWelcome: StateFlow<Boolean?> = prefs.hasSeenWelcomeFlow
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
+
+    fun setHasSeenWelcome(seen: Boolean) {
+        viewModelScope.launch { prefs.setHasSeenWelcome(seen) }
     }
 
     // -------------------------------------------------------------------------

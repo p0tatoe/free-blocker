@@ -481,10 +481,10 @@ class MyVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val stopIntent = PendingIntent.getService(
+        val stopIntent = PendingIntent.getActivity(
             this, 1,
-            Intent(this, MyVpnService::class.java).apply {
-                action = ACTION_STOP
+            Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_STOP_AND_CLOSE
             },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

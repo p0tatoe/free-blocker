@@ -19,11 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.outlined.Info
@@ -65,13 +67,19 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.michaelylee.freeblocker.data.BlocklistState
+import dev.michaelylee.freeblocker.ui.theme.ThemeMode
 import kotlinx.coroutines.delay
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BlockedWebsitesScreen(
     viewModel: VpnViewModel,
-    isDarkTheme: Boolean,
-    onThemeToggle: () -> Unit,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onCloseApp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -87,6 +95,7 @@ fun BlockedWebsitesScreen(
     val snackbarHost      = remember { SnackbarHostState() }
     var isListVisible     by remember { mutableStateOf(true) }
     var showInfoDialog    by remember { mutableStateOf(false) }
+    var isThemeVisible    by remember { mutableStateOf(true) }
 
     if (showInfoDialog) {
         androidx.compose.ui.window.Dialog(onDismissRequest = { showInfoDialog = false }) {
@@ -171,84 +180,68 @@ fun BlockedWebsitesScreen(
                 }
             }
 
-            // ── Settings islands ──────────────────────────────────────────────
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Theme Island
-                    Card(
-                        modifier = Modifier.weight(1f).clickable { onThemeToggle() },
-                        shape = androidx.compose.foundation.shape.CircleShape,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Start
-                        ) {
-                            androidx.compose.material3.FilledIconButton(
-                                onClick = onThemeToggle,
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = "Toggle theme",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = if (isDarkTheme) "Light mode" else "Dark mode",
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        }
-                    }
-
-                    // List Visibility Island
-                    Card(
-                        modifier = Modifier.weight(1f).clickable { isListVisible = !isListVisible },
-                        shape = androidx.compose.foundation.shape.CircleShape,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Start
-                        ) {
-                            androidx.compose.material3.FilledIconButton(
-                                onClick = { isListVisible = !isListVisible },
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isListVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = if (isListVisible) "Hide list" else "Show list",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = if (isListVisible) "Collapse list" else "Display list",
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        }
-                    }
-                }
-            }
-
             // ── Status card ───────────────────────────────────────────────────
             item {
                 VpnStatusCard(
                     isVpnEnabled        = isVpnEnabled,
                     isBlockingEnabled   = isBlockingEnabled,
                     isStartOnBoot       = isStartOnBoot,
+                    blocklistState      = blocklistState,
+                    hasCustomUrls       = customUrls.isNotEmpty(),
                     onBlockingToggle    = { viewModel.setBlockingEnabled(it) },
                     onStartOnBootToggle = { viewModel.setStartOnBoot(it) },
                     onCloseApp          = onCloseApp,
                 )
+            }
+
+            // ── Theme Selection ───────────────────────────────────────────────
+            item {
+                Column(
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 4.dp)
+                        .padding(horizontal = 8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isThemeVisible = !isThemeVisible },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text  = "Change Theme",
+                            style = MaterialTheme.typography.displayMedium,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        androidx.compose.material3.Surface(
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            IconButton(onClick = { isThemeVisible = !isThemeVisible }) {
+                                Icon(
+                                    imageVector = if (isThemeVisible) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isThemeVisible) "Collapse theme" else "Expand theme"
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                if (isThemeVisible) {
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    ) {
+                        ThemeMode.values().forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = ThemeMode.values().size),
+                                onClick = { onThemeModeChange(mode) },
+                                selected = mode == themeMode,
+                                icon = {} // text only
+                            ) {
+                                Text(mode.name)
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Manual blocked domains ────────────────────────────────────────
@@ -258,30 +251,28 @@ fun BlockedWebsitesScreen(
                         .padding(top = 12.dp, bottom = 4.dp)
                         .padding(horizontal = 8.dp),
                 ) {
-                    val blocklistText = if (customUrls.isNotEmpty()) {
-                        when (blocklistState) {
-                            is BlocklistState.Loading -> "updating blocklists…"
-                            is BlocklistState.Error   -> "⚠ error updating blocklists"
-                            else                      -> ""
-                        }
-                    } else {
-                        ""
-                    }
-                    
-                    val headerText = if (blocklistText.isNotEmpty()) {
-                        "Blocked Websites: ${manualBlocked.size} ($blocklistText)"
-                    } else {
-                        "Blocked Websites: ${manualBlocked.size}"
-                    }
-
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isListVisible = !isListVisible },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text  = headerText,
+                            text  = "Blocked Websites",
                             style = MaterialTheme.typography.displayMedium,
                         )
+                        Spacer(Modifier.weight(1f))
+                        androidx.compose.material3.Surface(
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            IconButton(onClick = { isListVisible = !isListVisible }) {
+                                Icon(
+                                    imageVector = if (isListVisible) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isListVisible) "Collapse list" else "Expand list"
+                                )
+                            }
+                        }
                     }
                 }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
@@ -318,6 +309,8 @@ private fun VpnStatusCard(
     isVpnEnabled        : Boolean,
     isBlockingEnabled   : Boolean,
     isStartOnBoot       : Boolean,
+    blocklistState      : BlocklistState,
+    hasCustomUrls       : Boolean,
     onBlockingToggle    : (Boolean) -> Unit,
     onStartOnBootToggle : (Boolean) -> Unit,
     onCloseApp          : () -> Unit,
@@ -377,7 +370,7 @@ private fun VpnStatusCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Status:",
                         style = MaterialTheme.typography.bodyLarge,
@@ -393,7 +386,27 @@ private fun VpnStatusCard(
                         style = MaterialTheme.typography.bodyLarge,
                         color = dotColor,
                     )
+                    
+                    val blocklistText = if (hasCustomUrls) {
+                        when (blocklistState) {
+                            is BlocklistState.Loading -> " (updating blocklists…)"
+                            is BlocklistState.Error   -> " (⚠ error updating blocklists)"
+                            else                      -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                    if (blocklistText.isNotEmpty()) {
+                        Text(
+                            text = blocklistText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+                Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = onCloseApp,
                 ) {
@@ -540,11 +553,9 @@ private fun BlockedDomainRow(
                     checked = menuExpanded,
                     onCheckedChange = { menuExpanded = it },
                 ) {
-                    val rotation by animateFloatAsState(targetValue = if (menuExpanded) 180f else 0f)
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = "Expand menu",
-                        modifier = Modifier.rotate(rotation)
+                        contentDescription = "Expand menu"
                     )
                 }
             },
