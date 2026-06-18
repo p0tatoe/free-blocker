@@ -4,7 +4,10 @@ import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * This is the blocklist impl, which stores the rules in a set <string>
+ * Manages the live state of the blocklist, including user-added rules and temporary pauses.
+ * 
+ * This class holds the active rules in memory and pushes any changes over to the Rust-based 
+ * DnsProxy via the [rustProxyCallback], which handles the actual DNS packet filtering.
  */
 class DnsFilter {
     private val TAG = "DnsFilter"
@@ -28,7 +31,7 @@ class DnsFilter {
 
     @Synchronized
     fun updateBlocklist(newBlocklist: Set<String>) {
-        this.blocklist = newBlocklist.filter { it.isNotBlank() }.toSet()
+        this.blocklist = newBlocklist.filter { it.isNotBlank() }.toSet() - pausedDomains.keys
         Log.d(TAG, "DnsFilter initialized with ${this.blocklist.size} static rules.")
         rustProxyCallback?.invoke(blocklist.toList())
     }
