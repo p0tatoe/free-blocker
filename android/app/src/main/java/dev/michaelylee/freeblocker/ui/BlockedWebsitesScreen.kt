@@ -428,7 +428,7 @@ private fun VpnStatusCard(
                     ),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clickable { uriHandler.openUri("https://example.com") }
+                        .clickable { uriHandler.openUri("https://michaelylee.dev/free-blocker/") }
                         .padding(4.dp),
                 )
                 Text(
@@ -438,7 +438,7 @@ private fun VpnStatusCard(
                     ),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clickable { uriHandler.openUri("https://example.com/privacy") }
+                        .clickable { uriHandler.openUri("https://michaelylee.dev/free-blocker-privacy/") }
                         .padding(4.dp),
                 )
             }
